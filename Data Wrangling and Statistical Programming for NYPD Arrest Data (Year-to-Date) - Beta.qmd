@@ -1,0 +1,1363 @@
+---
+title: "Data Wrangling and Statistical Programming for NYPD Arrest Data (Year-to-Date) - Beta"
+author: "Le'Sean Roberts"
+format: html
+editor: visual
+---
+
+## Data Wrangling and Statistical Programming for NYPD Arrest Data (Year-to-Date) - Beta
+
+### Abstract
+
+This dataset comprises a comprehensive record of every arrest made by the New York City Police Department (NYPD) during the current calendar year (2025). Each record serves as a granular snapshot of law enforcement activity, capturing the specific nature of the offense, the timing and precise location of the arrest, and the demographic profile of the individual arrested. The data is intended for public transparency and is used by researchers, policymakers, and the public to analyze crime trends, evaluate police resource allocation, and study the demographic impacts of law enforcement across New York City's five boroughs.
+
+### Guidelines for Data Usage
+
+1.  **Handling Missing Values**: Note that "null" values in demographic columns (like `AGE_GROUP` and `PERP_SEX`) are often explicitly represented as the string `"(null)"` rather than empty cells. Ensure your data cleaning process accounts for these strings.
+
+2.  **Geospatial Analysis**: Before mapping the data, filter out records where `Latitude` and `Longitude` are 0 or null, as these represent arrests where specific location data was not available or recorded.
+
+3.  **Classification Choice**: For broad trend analysis (e.g., "Violent Crime" vs "Property Crime"), use `OFNS_DESC`. For specific legal analysis, use `PD_DESC` or `LAW_CODE`.
+
+4.  **Temporal Trends**: While `ARREST_DATE` is provided, be mindful that arrest volumes can fluctuate based on seasonal factors, policy changes, and reporting delays.
+
+5.  **Demographic Sensitivity**: When performing demographic analysis, be aware that race and gender data are based on officer observation and reporting protocols, which may have inherent limitations.
+
+```{r}
+
+#| label: tbl-data-dictionary
+#| tbl-cap: "NYPD Arrest Data Dictionary"
+#| echo: false
+
+library(dplyr)
+library(gt)
+
+# Create the data frame
+data_dict <- data.frame(
+  Column_Name = c(
+    "ARREST_KEY", "ARREST_DATE", "PD_CD", "PD_DESC", "KY_CD", 
+    "OFNS_DESC", "LAW_CODE", "LAW_CAT_CD", "ARREST_BORO", 
+    "ARREST_PRECINCT", "JURISDICTION_CODE", "AGE_GROUP", 
+    "PERP_SEX", "PERP_RACE", "X_COORD_CD", "Y_COORD_CD", 
+    "Latitude", "Longitude", "Location"
+  ),
+  Data_Type = c(
+    "Integer", "Date", "Integer", "String", "Integer", 
+    "String", "String", "String", "String", 
+    "Integer", "Integer", "String", 
+    "String", "String", "Integer", "Integer", 
+    "Decimal", "Decimal", "String"
+  ),
+  Description = c(
+    "Randomly generated ID number for each arrest.",
+    "Exact date of arrest for the reported event.",
+    "Three-digit internal classification code (granular).",
+    "Description of internal classification code (PD_CD).",
+    "Three-digit internal classification code (general).",
+    "Description of the general offense category (KY_CD).",
+    "Law code for the offense.",
+    "Level of offense: F (Felony), M (Misdemeanor), V (Violation).",
+    "B (Bronx), S (Staten Island), K (Brooklyn), M (Manhattan), Q (Queens).",
+    "Precinct where the arrest occurred.",
+    "Jurisdiction responsible: 0 (Patrol), 1 (Transit), 2 (Housing).",
+    "Perpetrator’s age group.",
+    "Perpetrator’s sex: M (Male), F (Female).",
+    "Perpetrator’s race.",
+    "Midblock X-coordinate (State Plane Coordinate System).",
+    "Midblock Y-coordinate (State Plane Coordinate System).",
+    "Latitude coordinate for Global Coordinate System.",
+    "Longitude coordinate for Global Coordinate System.",
+    "Combined Geocoded Location Point."
+  )
+)
+
+# Render as a beautiful table
+data_dict |>
+  gt() |>
+  tab_header(
+    title = "Data Dictionary",
+    subtitle = "NYPD Arrest Data Year-to-Date"
+  ) |>
+  cols_label(
+    Column_Name = "Field",
+    Data_Type = "Type",
+    Description = "Definition"
+  ) |>
+  tab_options(
+    table.font.size = px(14),
+    column_labels.background.color = "#f4f4f4"
+  )
+```
+
+### Data Assimilation
+
+```{r}
+
+# Loading common libraries for data assimilation and probing
+library(tidyverse)
+library(lubridate)
+library(readr)
+NYPD_Arrest_Data_Year_to_Date_20260121 <- read_csv("C:/Users/verlene/Downloads/NYPD_Arrest_Data_(Year_to_Date)_20260121.csv")
+str(NYPD_Arrest_Data_Year_to_Date_20260121)
+```
+
+## Clean Grouping & Chronology Structure
+
+#### 1. Core Principle
+
+Crime classification is structural, while chronology is observational. Hence, crime classification must be independent of chronology. Chronology must be layered *after* classification. Group variables are created **without using time**. Time variables are layered **after classification**. This avoids circular logic (e.g., letting reporting delays distort offense trends).
+
+#### 2. Classification (The "What")
+
+Observing the level of granularity or detailed crimes descriptions.
+
+```{r}
+
+library(dplyr)
+
+# PD_DESC counts
+counts_PD_DESC <- NYPD_Arrest_Data_Year_to_Date_20260121 |>
+  count(PD_DESC, sort = TRUE)
+
+print(counts_PD_DESC, n=20)
+
+# OFNS_DESC counts
+counts_OFNS_DESC <- NYPD_Arrest_Data_Year_to_Date_20260121 |>
+  count(OFNS_DESC, sort = TRUE)
+
+print(counts_OFNS_DESC, n=20 )
+
+```
+
+There is too much granularity with crimes descriptions to have well focused analysis with general crime. Such concerns the attributes PD_DESC and OFNS_DESC. Such attributes are categorical when not considering the penal consequence(s) associated to each crime. For such attributes there are too many unique instances for any compact analysis.
+
+The core principle is to create a mapping that exists independently of time. We use `case_when` to transform the granular `OFNS_DESC` into broader "Crime Families."
+
+The core principle is to create a mapping that exists independently of time. We use `case_when` to transform the granular `OFNS_DESC` into broader "Crime Families."
+
+```{r}
+
+# FEATURING: Creating a Crime Family Grouping
+# This creates a static classification layer
+Classification_NYPD_Arrest_data <- NYPD_Arrest_Data_Year_to_Date_20260121 |>
+  mutate(CRIME_FAMILY = case_when(
+    str_detect(OFNS_DESC, "ASSAULT|RAPE|MURDER|ROBBERY|KIDNAPPING|STRANGULATION") ~ "Violent Crime",
+    str_detect(OFNS_DESC, "LARCENY|BURGLARY|CRIMINAL MISCHIEF|STOLEN PROPERTY|AUTO THEFT") ~ "Property Crime",
+    str_detect(OFNS_DESC, "DRUGS|ALCOHOL|INTOXICATED") ~ "Drug/Vice Crime",
+    str_detect(OFNS_DESC, "WEAPONS") ~ "Weapons Crime",
+    str_detect(OFNS_DESC, "FRAUD|FORGERY|BRIBERY|OFFENSES AGAINST PUBLIC ADMIN") ~ "Financial/Administrative",
+    TRUE ~ "Other/Public Order"
+  ))
+
+str(Classification_NYPD_Arrest_data)
+```
+
+#### 3. Chronology (The "When")
+
+Once the classification layer is established, to then apply the temporal layer. This allows the slicing of "Families" by any time unit without altering the underlying classification logic. Now, having the ability to execute desired operations without the logic for "What" (Crime Family) conflicting with "When" (Season/Month).
+
+```{r}
+
+# FEATURE: Exact Chronology Layering
+Classified_Temporal_NYPD_Arrest_data <- Classification_NYPD_Arrest_data |>
+  mutate(
+    ARREST_DATE = mdy(ARREST_DATE),
+    YEAR = year(ARREST_DATE),
+    # Define exact dates for season transitions
+    SEASON = case_when(
+      # Spring: March 20 - June 19
+      ARREST_DATE >= make_date(YEAR, 3, 20) & ARREST_DATE <= make_date(YEAR, 6, 19) ~ "Spring",
+      # Summer: June 20 - September 21
+      ARREST_DATE >= make_date(YEAR, 6, 20) & ARREST_DATE <= make_date(YEAR, 9, 21) ~ "Summer",
+      # Fall: September 22 - December 20
+      ARREST_DATE >= make_date(YEAR, 9, 22) & ARREST_DATE <= make_date(YEAR, 12, 20) ~ "Fall",
+      # Winter: December 21 - March 19 (handling the year crossover)
+      TRUE ~ "Winter"
+    )
+  )
+
+str(Classified_Temporal_NYPD_Arrest_data)
+```
+
+```{r}
+head(Classified_Temporal_NYPD_Arrest_data)
+```
+
+#### 4. Operation: Monthly Counts by Crime Family
+
+To now observe how different "Families" fluctuate month-to-month.
+
+```{r}
+
+# Monthly Counts by Crime Family 
+monthly_summary <- Classified_Temporal_NYPD_Arrest_data|>
+  group_by(MONTH = floor_date(ARREST_DATE, "month"), CRIME_FAMILY) |>
+  summarise(Total_Arrests = n(), .groups = "drop")
+
+# Result: A clean time-series ready for ggplot2
+
+str(monthly_summary)
+head(monthly_summary)
+```
+
+## Time Series Development Based on Crime Family
+
+Counting the number of NAs in each column of the monthly_summary dataframe to verify there's no missing values:
+
+```{r}
+
+# NA counts in monthly_summary
+na_counts <- sapply(monthly_summary, function(x) sum(is.na(x)))
+na_counts
+
+```
+
+```{r}
+# Time series for crime family
+ggplot(monthly_summary, aes(x = MONTH, y = Total_Arrests,
+                            color = CRIME_FAMILY)) +
+  geom_line(linewidth = 1) +
+  geom_point() +
+  facet_wrap(~CRIME_FAMILY, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Monthly Time Series for Each Crime Family",
+    subtitle = "Chronology layered after Classification (Free Y-Axis)",
+    x = "Month of Arrest",
+    y = "Number of Arrests"
+  ) +
+  theme(legend.position = "none")
+```
+
+## Seasonal Patterns by Groupings
+
+```{r}
+# Seasonal patterns for PD-DESC
+seasonal_patterns <- Classified_Temporal_NYPD_Arrest_data |>
+  group_by(SEASON, PD_DESC) |>
+  summarise(Volume = n(), .groups = "drop") |>
+  arrange(SEASON, desc(Volume))
+
+# Identifying the 'Signature' crime of a specific season
+top_summer_crimes <- seasonal_patterns |>
+  filter(SEASON == "Summer") |>
+  head(10)
+
+top_summer_crimes
+```
+
+## Neighbourbood Trends (Spatial-Temporal)
+
+This combines location (Precinct) with the layered chronology to see if specific neighborhoods experience spikes at different times of the year.
+
+```{r}
+
+neighborhood_trends <- Classified_Temporal_NYPD_Arrest_data |>
+  group_by(ARREST_PRECINCT, SEASON, CRIME_FAMILY) |>
+  summarise(Arrest_Count = n(), .groups = "drop")
+
+neighborhood_trends |>
+  head(10)
+
+```
+
+## Extracting Top Crimes for ALL Seasons
+
+```{r}
+
+# Extract top 10 crimes per season
+top_crimes_by_season <- seasonal_patterns |>
+  group_by(SEASON) |>
+  slice_max(order_by = Volume, n = 10) |>
+  ungroup()
+
+# View as a wide table to compare side-by-side
+comparison_table <- top_crimes_by_season |>
+  group_by(SEASON) |>
+  mutate(Rank = row_number()) |>
+  pivot_wider(names_from = SEASON, values_from = c(PD_DESC, Volume))
+
+comparison_table
+```
+
+## Identifying Seasonal Spikers
+
+If you want to find crimes that are **uniquely high** in one season compared to the others (e.g., "Seasonal Signature" crimes), you can calculate the relative percentage.
+
+```{r}
+
+seasonal_spikes <- seasonal_patterns |>
+  group_by(PD_DESC) |>
+  mutate(Total_Yearly = sum(Volume),
+         Percent_of_Yearly = (Volume / Total_Yearly) * 100) |>
+  filter(Total_Yearly > 50) |> # Filter out rare crimes for statistical significance
+  group_by(SEASON) |>
+  slice_max(order_by = Percent_of_Yearly, n = 5)
+
+# This shows crimes where a huge chunk of their yearly total happens in one season
+
+seasonal_spikes
+```
+
+## Potential of the Constructed Classification - Temporal Data Set
+
+The "main" dataset, Classified_Temporal_NYPD_Arrest_data, is not restricted to the wrangling activities developed or portayed earlier. One may pursue other interests with the attributes w.r..t choices of parameters.
+
+## Column-Wise Encoding of Categorical Variables with Inline Application - First Approach
+
+Objective: to **encode categorical variables directly into the dataset** while simultaneously **preserving per-column lookup tables** for traceability and reverse decoding.
+
+```{r}
+
+
+cols_to_encode <- c(
+  "CRIME_FAMILY",
+  "SEASON",
+  "PERP_SEX",
+  "PERP_RACE",
+  "AGE_GROUP",
+  "ARREST_BORO"
+)
+
+df_clean <- Classified_Temporal_NYPD_Arrest_data |>
+  filter(if_all(all_of(cols_to_encode), ~ .x != "(null)"))
+
+encoded_df <- df_clean
+mapping_list <- list()
+
+for (col in cols_to_encode) {
+  
+  mapping <- df_clean |>
+    distinct(.data[[col]]) |>
+    arrange(.data[[col]]) |>
+    mutate(code = row_number())
+  
+  mapping_list[[col]] <- mapping
+  
+  encoded_df <- encoded_df |>
+    left_join(mapping, by = setNames(col, col)) |>
+    rename(!!paste0(col, "_code") := code)
+}
+
+encoded_df
+```
+
+## Global, Tidy Mapping Construction - Second Approach
+
+Objective: to build a **single, auditable mapping table** that documents how **each categorical value maps to an integer**, independent of modeling or joins.
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+
+cols_to_encode <- c(
+  "CRIME_FAMILY",
+  "SEASON",
+  "PERP_SEX",
+  "PERP_RACE",
+  "AGE_GROUP",
+  "ARREST_BORO"
+)
+
+mapping_df <- Classified_Temporal_NYPD_Arrest_data |>
+  dplyr::filter(dplyr::if_all(dplyr::all_of(cols_to_encode), ~ .x != "(null)")) |>
+  dplyr::select(dplyr::all_of(cols_to_encode)) |>
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  dplyr::distinct(variable, value) |>
+  dplyr::arrange(variable, value) |>
+  dplyr::group_by(variable) |>
+  dplyr::mutate(code = dplyr::row_number()) |>
+  dplyr::ungroup()
+
+```
+
+```{r}
+
+# Identifying the mapping rules
+print(mapping_df, n=29)
+```
+
+The first approach is **procedural and application-oriented**. After removing rows containing the literal missing value `"(null)"`, it processes each categorical column independently. For every column, it extracts the set of unique string values, sorts them alphabetically, and assigns integer codes using `row_number()`. These codes are then immediately joined back to the cleaned dataset,
+
+Having a model-ready dataframe while also retaining per-column mapping tables for interpretability and reverse decoding. Its primary intent is to **encode categories directly for analysis or modeling**, with mappings preserved as supporting artifacts.
+
+The second approach is **declarative and documentation-oriented**. It applies the same row-level filtering, but reshapes the data into a long format so that all categorical variables are handled uniformly. Unique `(variable, value)` pairs are identified, values are sorted alphabetically within each variable, and integer codes are assigned using `row_number()` grouped by variable. The result is a single tidy mapping table that explicitly records how each categorical value maps to an integer, independent of any immediate modeling step. Its intent is to **define and audit the encoding scheme itself**, rather than to apply it inline.
+
+Despite these structural differences, both methods yield identical mappings because they operate on the **same filtered dataset**, use the **same uniqueness criterion**, apply the **same ordering rule**, and assign codes using the **same deterministic function**. For each column, the ordered set of unique string values is identical in both pipelines, and integer labels are assigned in the same sequence. Consequently, the mapping from category to code is mathematically equivalent in both cases—the difference lies only in presentation and workflow, not in the resulting encodings.
+
+## Developing a Data Set for Statistical Analysis
+
+Reviewing dataframe for choosing attributes of interest:
+
+```{r}
+str(encoded_df)
+```
+
+Now to synthesize a dataframe/dataset that' s readily available for statical analysis.
+
+```{r}
+data_stat_analy <- encoded_df |>
+  dplyr::select(ARREST_DATE, YEAR, SEASON_code,
+         CRIME_FAMILY_code, JURISDICTION_CODE,
+         ARREST_BORO_code, ARREST_PRECINCT,
+         Longitude, Latitude, PERP_SEX_code, PERP_RACE_code, AGE_GROUP_code)
+str(data_stat_analy)
+```
+
+Removing any possible missing values in the dataset/dataframe:
+
+```{r}
+
+# Removing NAs
+data_stat_analy_clean <- data_stat_analy |>
+  na.omit()
+
+# NA counts in monthly_summary
+na_counts_data_stat <- sapply(data_stat_analy_clean,
+                    function(x) sum(is.na(x)))
+na_counts_data_stat
+
+str(data_stat_analy_clean)
+
+```
+
+Acquired now is a **large, well-structured spatiotemporal arrest dataset** **called *data_stat_analy_clean,*** with over 120k rows...having time, space, and multiple categorical and ordinal codes. This supports **much stronger analysis than simple descriptives**. The possible spectrum for **analyses and statistical models**: exploratory → inferential → predictive → causal/spatial.
+
+## Analyses and Statistical Models
+
+### Descriptive Statistics for Categorical and Ordinal Variables
+
+Descriptive statistics for categorical and ordinal variables focus primarily on describing the distribution of data across categories, rather than calculating a numerical average. Because these data types are not continuous, traditional statistics like mean and standard deviation are generally inappropriate. 
+
+#### Categorical (Nominal) Variables
+
+A categorical variable (or qualitative variable) represents data that can be divided into distinct groups or categories, rather than being numerical quantities, with examples like hair color (blonde, brown) or yes/no responses, and can further be **nominal** (no order, e.g., eye color).
+
+**Key characteristics:**
+
+-   **Qualitative:** Describes qualities or characteristics, not amounts.
+
+-   **Fixed Categories:** Takes on a limited, fixed number of values or groups.
+
+-   **Mutually Exclusive:** Each observation fits into only one category. 
+
+**Descriptive Statistics for categorical variables:**
+
+-   **Central Tendency:** Mode (most frequent category).
+
+-   **Dispersion/Spread:** Index of Qualitative Variation (IQV), or simply listing frequencies.
+
+-   **Descriptive Summaries:** Frequencies (counts), Proportions, and Percentages.
+
+-   **Visualization:** Bar charts
+
+**Mode**: the value that appears most frequently in a data set, acting as a measure of central tendency alongside the mean and median, indicating the most common or popular item, category, or number, and a dataset can have one mode (unimodal), multiple modes (bimodal, multimodal), or no mode at all if all values occur equally often. It's particularly useful for categorical data but can also identify popular choices in numerical/continuous sets, representing the peak in a histogram. 
+
+**Index of Qualitative Variation (IQV)**: measures statistical dispersion or diversity in **nominal (categorical) data**, ranging from 0 (no variation, all cases in one category) to 1 (maximum variation, cases evenly split across categories). It's a standardized number showing how spread out categories are, useful for comparing diversity across different nominal variables like race or gender, and is calculated by comparing observed differences to the maximum possible differences in the dataset. 
+
+$$
+\text{IQV}\,=\,\frac{(1-\sum_{i=1}^k p_i^{2})}{(k-1)/k}
+$$
+
+where $k$ is the number of categories and $p_i$ is the proportion of cases in the $i$th category.
+
+**Frequency**: frequencies of a data set show **how often each value or range of values appears**, essentially counting occurrences, often presented in a **frequency distribution table** or graph (like a histogram) to reveal patterns, with types including **absolute frequency** (the raw count) and **relative frequency** (the proportion or percentage).
+
+**Bar charts (or bar graphs)**: are visual tools that use rectangular bars, either vertical or horizontal, to compare categorical data, where each bar's length or height represents a specific value, making it easy to see differences between groups like favorite pets, sales figures, or survey responses. They have two axes: one for categories (like names or types) and the other for a numerical scale, with bars aligned to a common baseline for simple comparison, often used to show distributions or trends.
+
+Development of the descriptive statistics for the categorical variables in the dataset:
+
+```{r}
+
+# 1 Datast of concern: data_stat_analy_clean
+
+# Define the categorical variables
+cat_vars <- c("SEASON_code", "CRIME_FAMILY_code", "JURISDICTION_CODE", 
+               "ARREST_BORO_code", "ARREST_PRECINCT", "PERP_SEX_code", "PERP_RACE_code")
+
+# Ensure variables are treated as factors
+data_stat_analy_clean[cat_vars] <-
+  lapply(data_stat_analy_clean[cat_vars], as.factor)
+
+# --- Helper Functions ---
+
+# Function to calculate Mode
+get_mode <- function(x) {
+  ux <- unique(x)
+  ux <- ux[!is.na(ux)]
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Function to calculate Index of Qualitative Variation (IQV)
+# IQV = [k(1 - Sum(p^2))] / (k - 1)
+calculate_iqv <- function(x) {
+  counts <- table(x)
+  k <- length(counts)
+  if (k <= 1) return(0) # IQV is 0 if only one category exists
+  n <- sum(counts)
+  proportions <- counts / n
+  sum_p_sq <- sum(proportions^2)
+  iqv <- (k * (1 - sum_p_sq)) / (k - 1)
+  return(iqv)
+}
+
+# --- Analysis Loop ---
+
+for (var in cat_vars) {
+  cat("\n--- Analysis for:", var, "---\n")
+  
+  # 2. Descriptive Summaries: Frequencies, Proportions, and Percentages
+  freq_table <- as.data.frame(table(data_stat_analy_clean[[var]]))
+  colnames(freq_table) <- c("Category", "Frequency")
+  
+  freq_table <- freq_table |>
+    mutate(
+      Proportion = Frequency / sum(Frequency),
+      Percentage = Proportion * 100
+    )
+  
+  print(freq_table)
+  
+  # 3. Central Tendency: Mode
+  mode_val <- get_mode(data_stat_analy_clean[[var]])
+  cat("Mode:", as.character(mode_val), "\n")
+  
+  # 4. Dispersion: Index of Qualitative Variation (IQV)
+  iqv_val <- calculate_iqv(data_stat_analy_clean[[var]])
+  cat("IQV (Index of Qualitative Variation):", round(iqv_val, 4), "\n")
+  
+  # 5. Visualization: Bar Charts
+  p <- ggplot(data_stat_analy_clean, aes_string(x = var)) +
+    geom_bar(fill = "steelblue", color = "black") +
+    theme_minimal() +
+    labs(title = paste("Frequency Distribution of", var),
+         x = var,
+         y = "Frequency") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  print(p)
+  
+  # Optional: Save each plot
+  # ggsave(filename = paste0("bar_chart_", var, ".png"), plot = p)
+}
+```
+
+#### Ordinal Variables
+
+An ordinal variable is a type of categorical variable where the categories have a meaningful, natural order or ranking, but the intervals between the categories are not necessarily equal or quantifiable. Think of it as "in-between" nominal (unordered categories) and interval (equal intervals) variables, with common examples including satisfaction scales (e.g., Very Dissatisfied to Very Satisfied) or education levels (e.g., High School, Bachelor's, Master's).
+
+**Key Characteristics:**
+
+-   **Order Matters:** The sequence of categories (e.g., small, medium, large) is significant.
+
+-   **Unequal Spacing:** You can't assume the difference between "small" and "medium" is the same as between "medium" and "large".
+
+-   **Ranking, Not Measurement:** It allows for ranking but not precise mathematical operations like averaging, as the distances aren't uniform. 
+
+For ordinal data (ranked categories like "low," "medium," "high"), use **frequencies, percentages, mode, and median** to describe central tendency and distribution, but **avoid the mean and standard deviation** because the intervals aren't equal; use the **range or interquartile range (IQR)** for variability. Visualize with **bar charts or pie charts** to show category counts and proportions.
+
+**Measures of Central Tendency**
+
+-   **Mode:** The most frequently occurring category (e.g., "medium" satisfaction).
+
+-   **Median:** The middle value in the ranked data set, often more meaningful than the mode for central tendency.
+
+**Measures of Variability & Distribution**
+
+-   **Frequencies & Percentages:** Count how many observations fall into each category and their proportion.
+
+-   **Range:** The difference between the highest and lowest categories (e.g., High - Low).
+
+-   **Interquartile Range (IQR):** The Interquartile Range (IQR) is a measure of statistical dispersion representing the spread of the middle 50% of a dataset. It is defined mathematically as the difference between the third quartile $(Q3)$ and the first quartile $(Q1)$, which are the 75th and 25th percentiles of the data, respectively. The range of the middle 50% of the data, useful for understanding spread without assuming equal intervals.
+
+    **Components:**
+
+    $Q1$ **(Lower Quartile):** Median of the lower half of the data (25th percentile).
+
+    $Q3$ **(Upper Quartile):** Median of the upper half of the data (75th percentile).
+
+    **Calculation Methods** 
+
+    1.  **Order Data:** Arrange data in ascending order.
+
+    2.  **Find Median** $(Q2)$ : Locate the median to split the data into lower and upper halves.
+
+    3.  **Find** $𝑄1$ **and** $𝑄3$:
+
+        **Exclusive Method:** If the number of data points is odd, the median is excluded from both halves before finding $𝑄1$ and $𝑄3$.
+
+        **Inclusive Method:** The median is included in both halves, which is sometimes used for smaller, odd-numbered datasets.
+
+    4.  **Subtract:** Calculate the difference $𝑄3−𝑄1$.
+
+**What to Avoid:**
+
+-   **Mean:** Cannot be calculated meaningfully because the difference between "low" and "medium" isn't necessarily the same as "medium" and "high".
+
+-   **Standard Deviation:** Not appropriate for the same reason the mean isn't.
+
+**Visualization**
+
+-   **Bar Charts:** Excellent for showing frequencies or percentages across ordered categories.
+
+-   **Pie Charts:** Can show proportions but become cluttered with many categories.
+
+Development of the descriptive statistics and primitive models for the ordinal variables in the dataset:
+
+```{r}
+
+# Identifying the mapping rules
+print(mapping_df, n=6)
+```
+
+```{r}
+
+# Load libraries
+library(scales) # For percentages in plots
+
+# Convert to an ordered factor
+# Codes are 1, 2, 3, 4, etc.
+# Adjust the 'levels' to match specific age group codes and order
+data_stat_analy_clean$AGE_GROUP_code <- factor(data_stat_analy_clean$AGE_GROUP_code,
+                            levels = c(1, 2, 3, 4, 5), # Example levels
+                            ordered = TRUE)
+
+# Verify the conversion
+str(data_stat_analy_clean$AGE_GROUP_code)
+
+```
+
+```{r}
+
+# Explore the ordinal variable
+# Frequency table
+table(data_stat_analy_clean$AGE_GROUP_code)
+
+# Visualize (e.g., bar chart)
+barplot(table(data_stat_analy_clean$AGE_GROUP_code),
+        main = "Distribution of Age Groups",
+        xlab = "Age Group Code",
+        ylab = "Frequency")
+
+# 5. Common Analyses
+# Mean/Median (use median for ordinal data)
+median(as.numeric(data_stat_analy_clean$AGE_GROUP_code),
+       na.rm = TRUE) # Convert to numeric for calculation
+
+# Example: Chi-squared test for association with a categorical variable (e.g., 'Outcome')
+# If 'Outcome' is also categorical
+chisq.test(data_stat_analy_clean$AGE_GROUP_code, data_stat_analy_clean$ARREST_BORO_code)
+
+# Example: Ordinal Logistic Regression (using 'MASS' package)
+
+library(MASS)
+
+glm.fit <- polr(AGE_GROUP_code ~ ARREST_BORO_code,
+                data = data_stat_analy_clean, Hess = TRUE)
+summary(glm.fit)
+```
+
+### Exploratory & Structural Analysis (Foundation)
+
+#### Distributional Anslysis
+
+Marginal and joint distributions of:
+
+1.  Arrests by **YEAR** $\times\,\,$ **SEASON** $\times\,\,$ **ARREST BOROUGH** $\times\,\,$ **CRIME FAMILY**
+2.  Kernel density for **Latitude/Longitude**
+3.  Zero-inflation checks (precincts with no arrests in periods)
+
+Such priors:
+
+1.  Identifies skewness, clustering, rare categories
+2.  Guides correct model family (Poisson vs NB, etc.)
+
+for each categorical variable $X$ :
+
+$$
+P(X=x)=\frac{n_x}{N}
+$$
+
+For bivariate frequency:
+
+$$
+P(X=x, Y=y)=\frac{n_{xy}}{N}
+$$
+
+```{r}
+
+# Single variable counts
+data_stat_analy |>
+  count(CRIME_FAMILY_code, sort = TRUE)
+
+# Joint distribution example 1
+data_stat_analy |>
+  count(CRIME_FAMILY_code, SEASON_code, sort = TRUE)
+
+# Joint disitribution example 2
+data_stat_analy |>
+  count(CRIME_FAMILY_code, ARREST_BORO_code, sort = TRUE)
+
+```
+
+#### Association & Dependence Structure 
+
+Chi-square tests examples:
+
+1.  PERP_SEX $\times$ CRIME_FAMILY
+2.  PERP_RACE $\times$ ARREST_BOROUGH
+
+Cramér’s V / Theil’s U (effect size, not just significance)
+
+Concerning both prior tools, with at least 120k observations, *everything* is significant — effect size matters.
+
+Chi-square statistics:
+
+$$
+\chi^2 = \sum_i \sum_j \frac{(O_{ij} - E_{ij})^2}{E_{ij}}
+$$
+
+Cramer's V:
+
+$$
+V=\sqrt{\frac{\chi^2}{N\,\times\,\text{min}(r-1,\,c-1)}}
+$$
+
+```{r}
+
+library(vcd)
+
+tbl_1 <- table(data_stat_analy$PERP_RACE_code, data_stat_analy$CRIME_FAMILY_code)
+chisq.test(tbl_1)
+
+assocstats(tbl_1)   # includes Cramer's V
+
+
+tbl_2 <- table(data_stat_analy$PERP_SEX_code, data_stat_analy$CRIME_FAMILY_code)
+chisq.test(tbl_2)
+
+assocstats(tbl_2)   # includes Cramer's V
+
+
+tbl_3 <- table(data_stat_analy$PERP_RACE_code, data_stat_analy$ARREST_BORO_code)
+chisq.test(tbl_3)
+
+assocstats(tbl_3)   # includes Cramer's V
+```
+
+### Count & Rate Models
+
+**Poisson / Negative Binomial Regression**
+
+Target:
+
+1.  Arrest counts aggregated by:
+
+    $$
+    \text{Precinct}\,\times\,\text{Time}\,\text{(day /week/ month)}
+    $$
+
+Model:
+
+$$
+\text{E}[Y_{pt}]=\,\text{exp}(\beta\,X_{pt})
+$$
+
+For modelling how **crime family, seasonality, jurisdiction** affect arrest volume.
+
+Upgrade: negative binomial, handling overdispersion (almost guaranteed here).
+
+Poisson:
+
+$$
+Y\,\sim\,Poisson(\lambda)
+$$
+
+$$
+\text{log}(\lambda)\,=\,\beta_0\,\,+\,\beta_1X_1\,+\,...+\,\beta_pX_p
+$$
+
+Negative Binomial (concerning overdispersion):
+
+$$
+Y\,\sim\,NB(\mu\,,\theta)
+$$
+
+$$
+\text{log}(\mu)\,=\,X\beta
+$$
+
+```{r}
+
+library(MASS)
+
+# Aggregate counts per precinct per month
+counts <- data_stat_analy |>
+  mutate(MONTH = lubridate::floor_date(ARREST_DATE, "month")) |>
+  count(ARREST_PRECINCT, MONTH)
+
+# Fit NB
+nb_model <- glm.nb(n ~ ARREST_PRECINCT + MONTH, data = counts)
+summary(nb_model)
+
+```
+
+### Categorical Outcome Models
+
+Multinomial Logit Regression
+
+1.  Target: CRIME_FAMILY_code or ARREST_BORO_code
+
+2.  Covariates: Season, juridisction, precinct, perp sex / race, location
+
+3.  Answers:
+
+    How characteristics shift **crime type probabilities**
+
+    Relative risk ratios across categories
+
+$$
+P(Y=k) = \frac{e^{X\beta_k}}{\sum_j e^{X\beta_j}}
+$$
+
+```{r}
+
+library(nnet)
+
+mlogit <- multinom(CRIME_FAMILY_code ~ SEASON_code + PERP_SEX_code + PERP_RACE_code + ARREST_BORO_code,
+                   data = data_stat_analy)
+summary(mlogit)
+
+BIC(mlogit)
+
+
+mlogit_null <- multinom(CRIME_FAMILY_code ~ 1, data = data_stat_analy)
+
+anova(mlogit_null, mlogit, test = "Chisq")
+
+
+library(pscl)
+pR2(mlogit)
+
+```
+
+Hierarchical (Mixed-Effects) Logistic Models
+
+1.  Arrests are nested:
+
+Individuals $\longrightarrow$ Precincts $\longrightarrow$ Boroughs $\longrightarrow$ Time
+
+Example:
+
+$$
+\text{logit}(P(\text{Crime}=k))=X\beta\,+u_{\text{precinct}}+v_{\text{boro}}
+$$
+
+Controls unobserved precinct-level heterogeneity.
+
+Avoids false precision.
+
+Mathematical Structure:
+
+$$
+\text{logit}(\frac{P(Y=1)}{1-P(Y=1)})=X\beta\,+u_{\text{precinct}}+v_{\text{boro}}
+$$
+
+```{r}
+
+library(lme4)
+
+mixed <- glmer(CRIME_FAMILY_code == "5" ~ SEASON_code + PERP_SEX_code + PERP_RACE_code + (1|ARREST_PRECINCT),
+               data = data_stat_analy,
+               family = binomial)
+summary(mixed)
+
+```
+
+### Time Series
+
+Seasonal Decomposition:
+
+1.  STL / TBATS on arrest counts
+
+2.  Extract:
+
+    Trend
+
+    Weekly/seasonal patterns
+
+    Shock periods
+
+Mathematical Structure - Decompose:
+
+$$
+Y_t=T_t\,+S_t\,+\,R_t
+$$
+
+```{r}
+
+# If the range is < 2 calendar years → STL with frequency = 365 will not work.
+library(forecast)
+
+ts_data <- data_stat_analy |>
+  count(ARREST_DATE)
+
+nrow(ts_data)
+range(ts_data$ARREST_DATE)
+
+```
+
+```{r}
+# ensure the series is truly regular (daily)
+library(tidyr)
+
+ts_data <- data_stat_analy |>
+  count(ARREST_DATE) |>
+  complete(ARREST_DATE,
+           fill = list(n = 0)) |>
+  arrange(ARREST_DATE)
+
+```
+
+If you only have \~1 year (or a bit more), **weekly seasonality** is far more defensible anyway for arrests.
+
+```{r}
+
+ts_obj <- ts(ts_data$n, frequency = 7)
+fit <- stl(ts_obj, s.window = "periodic", robust = TRUE)
+plot(fit)
+
+```
+
+Interpretation:
+
+1.  Seasonal → day-of-week effect
+2.  Trend → longer-term changes
+3.  Remainder → shocks / events
+
+This is often the *right* choice substantively.
+
+### Spatial & Spatiotemporal Models (Very Powerful Here)
+
+Spatial Point Pattern Analysis –
+
+Use lat/long directly
+
+1.  Kernel density estimation (hotspot maps).
+
+    Kernel Density Estimate:
+
+    $$
+    \hat{f}(x) = \frac{1}{nh} \sum_{i=1}^n K\left(\frac{x-x_i}{h}\right)
+    $$
+
+    ```{r}
+
+    library(spatstat)
+
+    pp <- ppp(data_stat_analy$Longitude,
+              data_stat_analy$Latitude,
+              window = owin(range(data_stat_analy$Longitude),
+                            range(data_stat_analy$Latitude)))
+
+    density_pp <- density(pp)
+    plot(density_pp)
+
+    ```
+
+2.  Ripley’s K / L functions (clustering vs randomness)
+
+Spatial Autoregressive Models –
+
+1.  When aggregating by precinct use SAR / CAR models
+
+2.  Why:
+
+    -   Arrests in nearby precincts are correlated
+
+    <!-- -->
+
+    -   Ignoring this biases coefficients
+
+Spatiotemporal Bayesian Models
+
+1.  Gold standard: INLA / CAR + time random effects
+2.  Answers
+    -    Where crime risk is **persistently elevate**
+
+    -    Distinguishes noise from structural hotspots
+
+## Interpretation-First Machine Learning
+
+### Feature Engineering
+
+Development at the **precinct–time** level (this is critical).
+
+Mathematical Aggregation
+
+1.  Let
+
+    $$
+    Y_{p,t}=\text{arrests in precinct}\,\,p\,\,\text{during time}\,\,t
+    $$
+
+2.  Construct a feature vector:
+
+$$
+X_{p,t}=\begin{bmatrix}\text{Crime family shares} \\\text{Seasonal shares} \\\text{Demographic shares} \\\text{Spatial coordinates}\end{bmatrix}
+$$
+
+Precinct–Month Feature Matrix:
+
+```{r}
+
+print(mapping_df,n=29)
+```
+
+```{r}
+
+# In the following code, with categorical features one isn't taking the mean of the category, rather, taking the mean of a logical vector:
+
+precinct_features <- data_stat_analy |>
+  mutate(MONTH = floor_date(ARREST_DATE, "month")) |>
+  group_by(ARREST_PRECINCT, MONTH) |>
+  summarise(
+    total_arrests = n(),
+    
+    # Crime family shares
+    pct_crime_family_1 = mean(CRIME_FAMILY_code == 1, na.rm = TRUE),
+    pct_crime_family_2 = mean(CRIME_FAMILY_code == 2, na.rm = TRUE),
+    pct_crime_family_3 = mean(CRIME_FAMILY_code == 3, na.rm = TRUE),
+    pct_crime_family_4 = mean(CRIME_FAMILY_code == 4, na.rm = TRUE),
+    pct_crime_family_5 = mean(CRIME_FAMILY_code == 5, na.rm = TRUE),
+    pct_crime_family_6 = mean(CRIME_FAMILY_code == 6, na.rm = TRUE),
+    
+    # Season shares
+    pct_season_1 = mean(SEASON_code == 1, na.rm = TRUE),
+    pct_season_2 = mean(SEASON_code == 2, na.rm = TRUE),
+    pct_season_3 = mean(SEASON_code == 3, na.rm = TRUE),
+    pct_season_4 = mean(SEASON_code == 4, na.rm = TRUE),
+    
+    pct_male = mean(PERP_SEX_code == 2, na.rm = TRUE),
+    pct_female = mean(PERP_SEX_code == 1, na.rm = TRUE),
+    mean_lon = mean(Longitude, na.rm = TRUE),
+    mean_lat = mean(Latitude, na.rm = TRUE),
+    
+    .groups = "drop"
+  )
+str(precinct_features)
+head(precinct_features, 10)
+```
+
+### Supervised Learning - Tree Based Models
+
+Targets (three tasks)
+
+1.  Crime Family (multiclass)
+
+    $$
+    Y\,\in\,\{1,...,K\}
+    $$
+
+2.  Borough (multiclass)
+
+3.  High-risk precint (binary)
+
+    Define:
+
+    $$
+    Y_{p,t}=\begin{cases}    1, & \text{if } \text{arrests}_{p,t} > Q_{0.9} \\    0, & \text{otherwise}\end{cases}
+    $$
+
+High-Risk Indicator:
+
+```{r}
+
+threshold <- quantile(precinct_features$total_arrests, 0.9)
+
+precinct_features <- precinct_features |>
+  mutate(high_risk = as.integer(total_arrests > threshold))
+
+```
+
+### Random Forest (Baseline, Robust)
+
+Random Forest approximates:
+
+$$
+\hat{f}(x)=\frac{1}{B}\sum_{b=1}^{B} T_b(x)
+$$
+
+where each $T_b$ is a bootstrapped decision tree.
+
+Why RF first:
+
+1.  Stable
+2.  Nonlinear
+3.  Built-in importance
+4.  Low tuning risk
+
+Random Forest (High-Risk Prediction):
+
+```{r}
+
+library(ranger)
+library(tibble)
+
+rf_model <- ranger(
+  high_risk ~ .,
+  data = precinct_features |>
+    dplyr::select(-MONTH),
+  probability = TRUE,
+  importance = "permutation"
+)
+
+importance_df <- rf_model$variable.importance |>
+  enframe(name = "feature", value = "importance") |>
+  arrange(desc(importance))
+
+print(importance_df)
+```
+
+### XGBoost (Primary Model)
+
+Boosted Additive model:
+
+$$
+\hat{y}_i = \sum_{m=1}^{M} f_m(x_i), \; f_m \in \mathcal{F}
+$$
+
+Objective:
+
+$$
+\mathcal{L} = \sum_{i=1}^{N} \ell(y_i, \hat{y}_i) + \sum_{m=1}^{M} \Omega(f_m)
+$$
+
+XGBoost (Binary):
+
+```{r}
+
+library(xgboost)
+
+
+X <- model.matrix(high_risk ~ . - MONTH, precinct_features)[,-1] 
+y <- precinct_features$high_risk
+
+
+dtrain <- xgb.DMatrix(data = X, label = y)
+
+params <- list(
+  objective = "binary:logistic",
+  max_depth = 5,
+  learning_rate = 0.05,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  eval_metric = "auc"
+)
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200
+)
+
+```
+
+### SHAP Interpretability (Key Part)
+
+SHAP decomposes prediction:
+
+$$
+f(x)=\phi_0\,+\,\sum_{j=1}^{p}\phi_j
+$$
+
+where $\phi_j$ is the marginal contribution of feature $j$.
+
+SHAP values:
+
+```{r}
+
+library(SHAPforxgboost)
+
+shap_values <- shap.values(
+  xgb_model = xgb_model,
+  X_train = X
+)
+
+shap_long <- shap.prep(
+  shap_contrib = shap_values$shap_score,
+  X_train = X
+)
+
+shap.plot.summary(shap_long)
+
+```
+
+### 
+
+Interpretation examples
+
+1.  **Positive SHAP** → increases high-risk probability
+2.  **Negative SHAP** → reduces risk
+3.  Nonlinear thresholds emerge naturally
+
+This is what makes the model *policy-safe*.
+
+### Multiclass Targets (Crime Family / Borough)
+
+XGBoost Multiclass:
+
+```{r}
+
+library(xgboost)
+
+# ---------------------------
+# 1. Create target labels
+# ---------------------------
+y_multi <- as.integer(factor(data_stat_analy$CRIME_FAMILY_code)) - 1
+
+# ---------------------------
+# 2. Create feature matrix (numeric only)
+# ---------------------------
+X <- data_stat_analy[, setdiff(names(data_stat_analy), "CRIME_FAMILY_code")]
+
+# Convert everything to numeric using model.matrix
+X_mat <- model.matrix(~ . - 1, data = X)
+
+# ---------------------------
+# 3. Build DMatrix
+# ---------------------------
+dtrain <- xgb.DMatrix(data = X_mat, label = y_multi)
+
+# ---------------------------
+# 4. Set parameters
+# ---------------------------
+params <- list(
+  objective = "multi:softprob",
+  num_class = length(unique(y_multi)),
+  max_depth = 6,
+  learning_rate = 0.1,
+  eval_metric = "mlogloss"
+)
+
+# ---------------------------
+# 5. Train model (correct API)
+# ---------------------------
+xgb_multi <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 150,
+  verbose = 0
+)
+
+# ---------------------------
+# 6. Predictions (optional)
+# ---------------------------
+pred_probs <- predict(xgb_multi, X_mat)
+
+```
+
+### Unsupervised Learning - Crime Regimes
+
+Analysis now becomes **structural**, not predictive.
+
+**Feature Matrix (Precinct-level)**
+
+Aggregate **long-run averages**:
+
+```{r}
+
+precinct_static <- precinct_features |>
+  group_by(ARREST_PRECINCT) |>
+  summarise(
+    across(where(is.numeric), \(x) mean(x, na.rm = TRUE))
+  )
+
+
+```
+
+Standardize:
+
+```{r}
+
+X_cluster <- scale(precinct_static |>
+                     dplyr::select(-ARREST_PRECINCT))
+
+```
+
+### k-Means
+
+Mathematical Structure:
+
+$$
+m = \sum_{k=1}^{K} \frac{1}{|C_k|} \sum_{i \in C_k} \left\| x_i - \mu_k \right\|^2
+$$
+
+```{r}
+
+set.seed(42)
+km <- kmeans(X_cluster, centers = 5, nstart = 25)
+
+precinct_static$cluster <- km$cluster
+
+```
+
+### Gaussian Mixture Models (Soft Regimes)
+
+Mathematical Structure:
+
+$$
+p(x) = \sum_{k=1}^{K} \pi_k \, \frac{1}{\sqrt{(2\pi)^d |\Sigma_k|}}\exp\left(-\frac{1}{2}(x-\mu_k)^\top \Sigma_k^{-1} (x-\mu_k)\right)
+$$
+
+GMM:
+
+```{r}
+
+library(mclust)
+
+gmm <- Mclust(X_cluster)
+precinct_static$gmm_cluster <- gmm$classification
+
+```
+
+Advantages:
+
+1.  Uncertainty-aware
+2.  Overlapping regimes
+3.  Better for criminology narratives
+
+### Interpreting Crime Regimes
+
+For each cluster:
+
+```{r}
+
+precinct_static |>
+  group_by(cluster) |>
+  summarise(across(where(is.numeric), mean))
+
+```
+
+Typical regimes to observe:
+
+1.  **High-volume, seasonal violent precincts**
+2.  **Low-volume, stable precincts**
+3.  **Property-crime dominated precincts**
+4.  **Transient / nightlife-driven precincts**
+
+### Benefits
+
+1.  Nonlinear but interpretable
+2.  SHAP allows legal / policy defensibility
+3.  Regime analysis moves beyond prediction
+4.  Integrates naturally with spatial models later
+
+## References
+
+(NYPD), P. D. (2025, October 27). *NYPD arrest data (year to date): NYC Open Data*. NYPD Arrest Data (Year to Date) \| NYC Open Data. https://data.cityofnewyork.us/Public-Safety/NYPD-Arrest-Data-Year-to-Date-/uip8-fykc/about_data
