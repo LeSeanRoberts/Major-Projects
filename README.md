@@ -4,7 +4,7 @@ Tobago Weather Data (HTML): https://drive.google.com/file/d/17aMF8x_WWA-w6jTtqXt
 Tobago Weather Data (Jupyter): https://drive.google.com/file/d/1msDizEbuRmQmgs8dcAjzW5GDzk-hbtQC/view?usp=drive_link
 
 
-# Hi, I'm Le' Sean Roberts | Data Wrangling & Statisticakl Programming Specialist
+# Hi, I'm Le' Sean Roberts | Data Wrangling & Statistical Programming Specialist
 
 I specialize in building transparent data models and optimizing data extraction processes. 
 My work focuses on bridging the gap between raw system data and actionable agency insights.
