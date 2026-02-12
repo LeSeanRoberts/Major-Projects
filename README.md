@@ -10,12 +10,13 @@ I specialize in building transparent data models and optimizing data extraction 
 My work focuses on bridging the gap between raw system data and actionable agency insights.
 
 ### 🔍 Technical Focus
-* **Data Integrity:** Designing reliability checks and anomaly detection protocols.
-* **Process Optimization:** Streamlining data collection and API-based retrieval strategies.
-* **Visualization:** Developing interactive dashboards (Tableau/Power BI) for stakeholder reporting.
+* **Data Integrity:** Designing reliability checks and anomaly detection protocols. PyOD use. 
+* **Data Wrangling:** From Data Asimilation (APIs, Databases, etc.) to data cleaning to feature engineering. Tidyverse and Pandas. DBI + dbplyr. Sparklyr. SQLAlchemy, PySpark. 
+* **Statistical Programming:** Exploratory data analysis, unsupervised learing, feature importance/selection, supervised learning, ensemble learning and time series (analysis, modelling, forecasting)
+* **Visualization:** ggplot2, matplotlib, seaborn, folium, geopandas. Tableau basics. 
 * **Documentation:** Crafting technical requirements and data definitions for scalable systems.
 
 ### 🛠️ Tool Stack
-* **Languages:** Python (Pandas, NumPy), SQL (PostgreSQL, MySQL)
+* **Languages:** Python and R. Subjugating SQL environments with Python or R. 
 * **API/Integration:** RESTful APIs, JSON, Caching strategies
-* **DevOps/Tools:** Git, GitHub Actions, Excel/VBA
+* **DevOps/Tools:**GitHub Actions
