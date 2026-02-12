@@ -17,6 +17,6 @@ My work focuses on bridging the gap between raw system data and actionable agenc
 * **Documentation:** Crafting technical requirements and data definitions for scalable systems.
 
 ### 🛠️ Tool Stack
-* **Languages:** Python and R. Subjugating SQL environments with Python or R. 
+* **Languages:** Python and R. Subjugating SQL environments with Python or R.
 * **API/Integration:** RESTful APIs, JSON, Caching strategies
 * **DevOps/Tools:** GitHub Actions
