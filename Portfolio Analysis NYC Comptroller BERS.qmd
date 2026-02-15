@@ -1,0 +1,2518 @@
+---
+title: "Portfolio Risk & Performance Analytics for a Public Pension Fund Using NYC Comptroller BERS Holdings Data"
+subtitle: |
+  [Email](lesean.roberts85@gmail.com) | 
+  [LinkedIn](https://linkedin.com/in/yourprofile) | 
+  [GitHub](https://github.com/yourusername)
+author: "Le'Sean Roberts"
+description: "CUNY New York City College of Technology Alumni (Graduate)"
+date: today
+date-format: long
+format: html
+---
+
+## Portfolio Risk & Performance Analytics for a Public Pension Fund Using NYC Comptroller BERS Holdings Data
+
+## Abstract
+
+All portfolio analytics were conducted using the most recent fiscal year snapshot (Period End date) to ensure values represent the current holdings and avoid double counting across historical periods. Project serves to exhibit highly basic portfolio analysis via data wrangling for public investment funds, particularly for New York City governance.
+
+## Introduction
+
+Public pension funds manage billions of dollars on behalf of retirees and taxpayers, requiring careful oversight of investment allocation, risk exposure, and financial performance. Effective portfolio analytics help ensure diversification, control downside risk, and maintain long-term solvency.
+
+This project analyses security-level holdings data from the Board of Education Retirement System (BERS), provided through NYC Open Data by the Comptroller’s Office. This data was first made public on October 29th, 2018; last updated on March 3rd, 2025. The dataset contains detailed information on fixed income and other investments, including market values, costs, unrealized gains and losses, credit ratings, maturities, and industry classifications.
+
+Using R, this study develops a suite of practical portfolio analytics that mirror workflows used in asset management, pension oversight, and financial risk management. The analysis focuses on (some of) the following:
+
+-   Asset allocation
+
+-   Diversification and concentration risk
+
+-   Investment performance
+
+-   Credit quality exposure
+
+-   Interest rate (duration) risk
+
+-   Predictive modeling of losses
+
+Together, these components provide a comprehensive picture of the fund’s financial health and risk profile.
+
+## Data Dictionary
+
+Based on the NYC Open Data portal for the **Board of Education Retirement System (BERS) Holdings Data**, here is a data dictionary of the attributes for the investment fund securities.
+
+```{r}
+
+#| echo: false
+#| message: false
+#| warning: false
+
+library(knitr)
+library(kableExtra)
+
+data_dict <- data.frame(
+  Column = c("Local Currency Code", "Trade Country Name", "Security Name", "Security Description", 
+             "Maturity Date", "Interest Rate", "Original Face", "Shares/Par Value", 
+             "Base Market Value", "Base Total Cost", "Base Unrealized Gain/Loss", "Period End"),
+  API_Field = c("local_currency_code", "trade_country_name", "security_name", "security_description", 
+                "maturity_date", "interest_rate", "original_face", "shares_par_value", 
+                "base_market_value", "base_total_cost", "base_unrealized_gain_loss", "period_end"),
+  Type = c("Text", "Text", "Text", "Text", "Date", "Number", "Number", "Number", "Number", "Number", "Number", "Date"),
+  Description = c("Currency code of the originating country.",
+                  "Country of origin for the security.",
+                  "Name of security, company, or fund.",
+                  "Basic description of the investment.",
+                  "Date the investment matures.",
+                  "Interest rate paid on the investment.",
+                  "Original face value of the instrument.",
+                  "Shares for stocks; Par value for bonds.",
+                  "Market value at the end of the period.",
+                  "Total cost basis of the investment.",
+                  "Gain or loss since acquisition.",
+                  "Closing date of the fiscal year.")
+)
+
+kable(data_dict, caption = "NYC BERS Holdings Data Dictionary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+## Data Assimilation
+
+Data for financial assets managed by NYCERS is acquired though a Socrata Soda API that's JSON based. Financial assets comprise of equity, fixed income and cash based instruments of the identified pension/retirement system as of the close of the fiscal year. An aim is assimilate as much data as possible to develop strong analysis, modelling and prediction interests.
+
+```{r, warning=FALSE, message=FALSE}
+library(httr)
+library(jsonlite)
+library(dplyr)
+
+#API details
+
+base_url <- "https://data.cityofnewyork.us/api/v3/views/fypi-ruxh/query.json"
+token <- "MT3MJyn9XM0eR0xq7dJj02KRQ"
+
+target <- 100000
+batch  <- 20000   # safe upper bound
+
+offset  <- 0
+pieces  <- list()
+
+while(offset < target){
+
+  size <- min(batch, target - offset)
+
+  resp <- GET(
+    base_url,
+    query = list(
+      "$limit"  = size,
+      "$offset" = offset
+    ),
+    add_headers(`X-App-Token` = token)
+  )
+
+  stop_for_status(resp)
+
+  dat <- fromJSON(content(resp, "text", encoding="UTF-8"), flatten=TRUE)
+
+  pieces[[length(pieces)+1]] <- dat
+  offset <- offset + nrow(dat)
+
+  cat("Fetched:", offset, "\n")
+}
+
+df <- bind_rows(pieces)
+
+dim(df)
+
+```
+
+A glimpse of the data with for the attributes (columns) and data types.
+
+```{r}
+glimpse(df)
+```
+
+Confirming the asset classes (types) in the portfolio.:
+
+```{r}
+
+# Get a list of unique values for every column
+unique_cases_list <- lapply(df, unique)
+
+# To view unique cases for a specific column, e.g., 'vendorid'
+print(unique_cases_list$asset_class)
+```
+
+A premature view for possible data integrity issues:
+
+```{r}
+
+# 1. Calculate NAs per column
+na_counts <- colSums(is.na(df))
+
+# 2. Find the name of the column with the maximum NAs
+most_missing_col <- names(which.max(na_counts))
+max_count <- max(na_counts)
+
+# 3. Print the result
+cat("The column with the most missing values is:", most_missing_col, 
+    "\nNumber of missing values:", max_count)
+
+```
+
+```{r}
+
+# Ranking attributes concerning missing values:
+
+df |>
+  summarise(across(everything(), ~ sum(is.na(.)))) |>
+  tidyr::pivot_longer(everything(), names_to = "column", values_to = "na_count") |>
+  arrange(desc(na_count))
+```
+
+Such data stemming from the **New York City Office of the Comptroller** holdings system, missingness is mostly **structural**, not random:
+
+-   Ratings missing → often **non-rated securities**
+
+-   Maturity missing → **equities or perpetuals**
+
+-   Description missing → metadata issue
+
+-   data_as_of missing → ingestion inconsistency
+
+```{r}
+
+library(scales) # Optional: for nice percentage formatting
+
+# 1. Total rows based on your latest update
+total_rows <- 176407
+
+# 2. Create the data frame from your count data
+summary_df <- data.frame(
+  Column = c("s_and_p_quality_rating", "maturity_date", "moody_s_quality_rating", "data_as_of", "security_description"),
+  Missing = c(29524, 27934, 27833, 21331, 1317)
+)
+
+# 3. Use mutate to calculate percentage and add the Impact column
+final_report <- summary_df |>
+  mutate(
+    `%` = (Missing / total_rows) * 100,
+    Impact = case_when(
+      Column == "maturity_date"           ~ "affects duration analysis",
+      Column == "moody_s_quality_rating"  ~ "affects credit risk",
+      Column == "s_and_p_quality_rating"  ~ "affects credit risk",
+      Column == "data_as_of"              ~ "affects time trends",
+      Column == "security_description"    ~ "minor",
+      TRUE                                ~ "unknown"
+    )
+  ) |>
+  arrange(desc(Missing))
+
+# Dataframe exhibition
+final_report
+```
+
+## Overview of Practical Projects Based on the Level of Data Integrity Observed
+
+### Safe Projects: use **c**omplete columns only (market value, cost, industry, asset class, gains)
+
+1.  Asset Allocation
+
+    Attributes:
+
+    asset_class
+
+    base_market_value,
+
+    industry
+
+2.  Industry Concentration / Herfindahl for Portfolio Analytics
+
+    Attributes:
+
+    minor_industry_name
+
+    base_market_value
+
+3.  Gain / Loss Performance Analysis
+
+    Attributes:
+
+    base_total_cost
+
+    base_unrealized_gain_loss
+
+4.  Return Modelling / ML Loss Prediction
+
+    Attributes:
+
+    interest_rate
+
+    value
+
+    industry
+
+    asset class
+
+    cost
+
+### Projects that Require Minor Adjustments
+
+1.  Credit Risk Exposure
+
+    For the attribute that is s_and_p_quality_rating, there's approximately 17% missing data.
+
+    For the attribute that is moody_s_quality_rating, there's approximately 16% missing data.
+
+    Hence, to treat missing data for such attributes as **"Not Rated"**. This is realistic — many bonds are unrated. Will have a NR bucket for analysis.
+
+2.  Maturity / Duration
+
+    Only bonds have maturity. Equities don’t have maturity anyway.
+
+### Concern for the "Period End" Column
+
+This instruction comes from the **New York City Office of the Comptroller** holdings report methodology and it means:
+
+1.  Each file/API pull may contain **multiple fiscal snapshots** of the portfolio.
+
+2.  You must **filter to the latest “Period End” date** to avoid mixing historical and current holdings.
+
+3.  What "Period End" means. The attribute period_end_date = portfolio snapshot date
+
+    Example:
+
+    -   2021-06-30
+
+    -   2022-06-30
+
+    -   2023-06-30
+
+    Each date = a **complete portfolio at that time** (not incremental rows). So:
+
+    Treat like **panel data**
+
+    Analyse **one date at a time**
+
+## Data Cleaning
+
+The process of identifying and correcting inaccurate, incomplete, improperly formatted, or duplicate data within a dataset. The main goal is to improve data quality—ensuring it is consistent, reliable, and usable for analysis, reporting, and machine learning pursuits. For this particular application, hastily dropping rows and columns is not meaningful, as one will observe throughout this development.
+
+```{r, message=FALSE, warning=FALSE}
+
+library(lubridate)
+
+df_clean <- df |>
+  mutate(
+    s_and_p_rating = ifelse(is.na(s_and_p_quality_rating), "NR", s_and_p_quality_rating)
+  ) |>
+        # NR quality label for fixed income instruments with missing credit rating data
+  mutate(
+    moody_s_rating = ifelse(is.na(moody_s_quality_rating), "NR", moody_s_quality_rating)
+        # NR quality label for fixed income instruments with missing credit rating data
+  ) |>
+  # Convert to date
+  mutate(period_end_date = as.Date(period_end_date))
+  
+# Find latest fiscal year
+max_date <- max(df_clean$period_end_date, na.rm = TRUE)
+max_date
+```
+
+The last function above (max_date), this finds **one single date only**:
+
+$$
+\text{max_date} = \max_{i}(\text{period_end_date}_{i})
+$$
+
+So this is just the **latest reporting date** in the entire dataset.
+
+Filter to latest "snapshot":
+
+```{r}
+
+df_latest <- df_clean |>
+  filter(period_end_date == max_date)
+
+```
+
+Mathematically this is:
+
+$$
+df_{latest}=\{i:\,\text{period_end_date}_i=\text{max_date}\}
+$$
+
+Of consequence, only rows from one date is kept, and discarding all others.
+
+Verification:
+
+```{r}
+
+table(df_latest$period_end_date)
+
+```
+
+There are many historical periods, but only \~13.6k observations belong to the most recent period. Very typical for panel/portfolio data.
+
+Without such prior filter, holdings for different years will be stacked together.Of consequence:
+
+-   totals inflated
+
+-   allocation wrong
+
+-   duplicates exist
+
+-   not a real portfolio
+
+With the filter, acquired will be current holdings only. Of consequence data is:
+
+-   cross-sectional
+
+-   financially correct (for analysis and modelling)
+
+-   emulates real fund reporting
+
+Utilisation of df_latest for:
+
+1.  Asset Allocation
+
+2.  Industry Concentration
+
+3.  Credit Exposure
+
+4.  Duration Risk
+
+5.  ML Loss Prediction
+
+NOTE: the filter applied is not appropiate for **time series** projects. Time series would be more appropriate with the following (as an example):
+
+df_clean \|\>
+
+group_by(period_end_date, asset_class) \|\>
+
+summarise(value = sum(base_market_value))
+
+## Asset Allocation Analysis
+
+Now, to evaluate how capital is distributed across asset classes and industries. By aggregating market values and computing portfolio weights, one can assess whether the fund is appropriately diversified or overly concentrated in certain investment types.
+
+**Key outputs:**
+
+-   allocation weights
+
+-   bar charts of exposures
+
+-   sector breakdowns
+
+**Purpose:**\
+Comprehend strategic positioning and diversification.
+
+```{r}
+ glimpse(df_latest)
+```
+
+Additional cleaning. Observe for the original credit ratings columns (attributes) there's NA and "NA". Now, to resolve this issue.
+
+`{glimpse(df_latest)}`
+
+Why this is better than ifelse():
+
+• `na_if(x, "NA")` → converts string `"NA"` to real NA\
+• `coalesce(x, "NR")` → replaces any NA with `"NR"`\
+• vectorized + faster + cleaner\
+• avoids nested conditions
+
+```{r}
+
+# Dropping the now useless predecessor credit rating columns
+# Dating convention must be practical
+# Making quantitative atrributes quantitative
+
+portfolio_df <- df_latest |>
+  select(
+    -moody_s_quality_rating,
+    -s_and_p_quality_rating,
+    -s_and_p_rating,
+    -moody_s_rating  
+  )|>
+  mutate(
+    maturity_date   = as.Date(maturity_date),
+    across(
+      c(
+        interest_rate,
+        shares_par_value,
+        base_market_value,
+        base_total_cost,
+        base_unrealized_gain_loss,
+        base_accrued_interest,
+        local_total_cost_amount,
+        local_unrealized_gain_loss
+      ),
+      as.numeric
+    ) 
+  )
+ 
+glimpse(portfolio_df)
+```
+
+**Goal:** determining where (how) money is invested.
+
+Calculating the proportional distribution of market value across different asset classes. Since the data treats each asset entry as an independent observation, the mathematical structure follows a standard **aggregation and normalization** pattern.
+
+**Data Grouping and Summation:**
+
+Partitioning the data into subsets based on the category $j$, representing each unique asset class in the asset_class attribute. For each class, it calculates the total market value $V_j$ by summing the individual market values $v_i$ of all assets belonging to that class.
+
+$$
+V_j = \sum_{i \in \text{Class}_j} v_i
+$$
+
+where:
+
+$V_j$ : The aggregate market value for asset class $j$.
+
+$v_i$ : The base_market_value of an individual observation $i$
+
+**Global Total Calculation:**
+
+To determine the weights, there's implicit calculation of the total market value $V_{total}$ across all asset classes combined:
+
+$$
+V_{\text{total}} = \sum_{j=1}^{n} V_j
+$$
+
+**Weight Derivation (Normalisation):**
+
+Finally, there's step of "mutation" which applies a normalisation to acquire the relative weight $w_j$ for each asset class. This ensures that the sum of all weights equals 1 (or 100%).
+
+$$
+w_j\,=\,\frac{V_j}{V_{total}}
+$$
+
+```{r}
+
+alloc <- portfolio_df |>
+  group_by(asset_class) |>
+  summarise(value = sum(base_market_value, na.rm = TRUE)) |>
+  mutate(weight = value / sum(value) * 100)
+
+alloc
+
+```
+
+**Identified Strategy: "Aggressive Balanced:**
+
+This portfolio profile is typical for an investor with a **long-term time horizon** and a **higher risk tolerance**. It doesn't quite hit the 80%+ mark of a "Pure Growth" strategy, but it significantly exceeds the 60% threshold of a standard "Balanced" portfolio.
+
+**Key Characteristics:**
+
+-   **Risk Profile:** Medium-High. The 72% Equity stake suggests the portfolio is sensitive to stock market cycles.
+
+-   **Target:** Capital appreciation is the main goal, with the 27% Fixed Income portion designed to mitigate "drawdowns" (peak-to-trough declines).
+
+-   **Efficiency:** The extremely low Cash position (\~0.06%) indicates a "fully invested" approach, minimizing **cash drag** (where idle cash lowers overall returns).
+
+Bar charts of exposures:
+
+```{r, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+
+ggplot(alloc, aes(reorder(asset_class, value), value)) +
+  geom_col() +
+  scale_y_continuous(labels = dollar) +
+  coord_flip() +
+  labs(title = "Portfolio Allocation by Asset Class",
+       x = "", y = "Market Value")
+
+```
+
+**Tax-Efficient Rebalance:**
+
+Moving from aggregate math to **individual lot selection**. Since each row in the dataframe represents a unique, independent purchase, to then rank them based on their "tax cost."
+
+**The Strategy: HIFO vs. LOFO**
+
+-   **HIFO (Highest In, First Out):** Selling the shares you bought at the highest price. This minimizes the realized gain.
+
+-   **LOFO (Lowest Out, First Out):** Selling lots currently at a loss (Tax-Loss Harvesting) to offset gains elsewhere.
+
+**The Mathematical Ranking**
+
+For each (independent) instrument for asset class considered, to calculate unrealised gain/loss ratio:
+
+$$
+G_i\,=\,\frac{P_{current}\,-\,P_{purchase,\,i}}{P_{purchase,\,i}}
+$$
+
+To minimize tax, sorting the data in manner to sell rows where $G_i$ is identified as the lowest (or most negative) first.
+
+**Caveat Concerning original_face**
+
+In many financial datasets, **Face Value** is a common substitute for cost, but it carries a specific mathematical distinction to be aware of before implementing any rebalancing.
+
+While original_face represents the **par value**, the amount the issuer or equity (promises) to pay back (at maturity or "punch in sell"), it's not always what you actually paid (**purchase cost or something similar**).
+
+-   **If bought at Par:** $Original\,\,Face=Purchase\,\,Cost$
+
+-   **If bought at a Discount:** $Original\,\,Face\,>\,Purchase\,\,Cost$ (e.g., Zero-coupon bonds)
+
+-   **If bought at a Premium:** $Original\,\,Face\,<\,Purchase\,\,Cost$
+
+For **Equity**, "Original Face" is less common; customarily observed is "Book Cost" or "Cost Basis." However, for **Fixed Income**, using Original Face as a proxy for cost will give provide an approximation of the "Principal" invested, rather than the "Market Value."
+
+Concerning inflation-linked or amortizing assets, since the data treats each instrument as independent, one must also check if any of theassets are **amortizing** (like Mortgages) or **inflation-linked** (like TIPS).
+
+```{r}
+# Fixed income instruments systhesis
+FI <- portfolio_df |>
+filter(asset_class == "FIXED INCOME")
+
+dim(FI)
+```
+
+```{r}
+
+# Pursuing description of fixed income instruments types
+# Get a list of unique values for every column
+unique_cases_list_fi <- lapply(FI, unique)
+
+# To view unique cases for a specific column, e.g., 'vendorid'
+print(unique_cases_list_fi$security_description)
+```
+
+The data appears to conceal "sensitive information" concerning the specifics of the fixed income instruments in portfolio. Anyways, for the case of inflation-linked or amortizing assets, original_face remains static, but **adjusted cost base** varies over time. If to use original_face, one might accidentally calculate a massive "gain" that doesn't actually exist for tax purposes, leading you to sell the wrong lots.
+
+**Use of Local Total Cost Amount for Tax-Rebalancing**
+
+Local Total Cost Amount represents the actual **Cost Basis**. In tax accounting, your realised gain/loss is calculated as:
+
+$$
+\text{Realised Gain/Loss}\,=\,\text{Market Value}\,-\,\text{Cost Basis}
+$$
+
+Using this atrribute or column ensures correctly identifying "lots" with the highest cost relative to their current value, permitting **Tax-Loss Harvesting**.
+
+To identify the best rows to sell to reach the \~70% Equity target, the rationale should appear like the following:
+
+$$
+G_i\,=\,\frac{V_i-C_i}{C_i}
+$$
+
+where
+
+$V_i$ = base_market_value
+
+$C_i$ = local_total_cost_amount
+
+```{r}
+
+rebalance_candidates <- portfolio_df |>
+  # Filter out Cash (usually has 0 gain/loss)
+  filter(asset_class %in% c("EQUITY", "FIXED INCOME")) |>
+  mutate(
+    # Calculate the dollar gain/loss per independent trip
+    unrealised_gain_loss = base_market_value - local_total_cost_amount) |>
+  mutate(
+    # Calculate percentage for better comparison across different trip sizes
+    gain_pct = (unrealised_gain_loss / local_total_cost_amount) * 100) |>
+  # Sort so that the best "Sells" (the biggest losses) are at the top
+  arrange(gain_pct)
+
+rebalance_candidates
+```
+
+## Industry Concentration & Herfindahl Risk
+
+Diversification reduces portfolio risk. This module quantifies concentration using sector-level exposures and calculates the Herfindahl–Hirschman Index (HHI), a standard measure of market concentration.
+
+Now, developing a clean sequence of mathematical operators applied to grouped financial exposures.
+
+**Raw Holdings Structure:**
+
+For observations, let each portfolio holding be indexed by $i$ and each industry by $j \in \mathcal{J}$.
+
+$$
+(i, j, v_{ij})
+$$
+
+where:
+
+$i$ = security/holding index
+
+$j$ = minor industry
+
+$v_{ij}$ = base market value of holding $i$ in industry $j$
+
+**Industry Aggregation:**
+
+Total exposure for industry $j$:
+
+$$
+V_j = \sum_{i \in j} v_{ij}
+$$
+
+**Total Portfolio Vale:**
+
+$$
+V = \sum_{j \in \mathcal{J}} V_j
+$$
+
+**Industry Weights:**
+
+Normalized industry weights –
+
+$$
+w_j = \frac{V_j}{V}
+$$
+
+Subject to the simplex constraints:
+
+$$
+\begin{align}0 \le w_j \le 1 \\\sum_{j \in \mathcal{J}} w_j = 1\end{align}
+$$
+
+**Weight Vector:**
+
+$$
+\mathbf{w} = (w_1, w_2, \dots, w_J)
+$$
+
+**Order (Ranking):**
+
+Sorted weights –
+
+$$
+w_{(1)} \ge w_{(2)} \ge \dots \ge w_{(J)}
+$$
+
+**Herfindahl--Hirschman Index (HHI):**
+
+Scalar definition –
+
+$$
+HHI = \sum_{j \in \mathcal{J}} w_j^2
+$$
+
+Equivalent expanded form –
+
+$$
+HHI = \sum_{j \in \mathcal{J}} \left(\frac{V_j}{V}\right)^2
+$$
+
+Vector (Euclidean norm) form –
+
+$$
+HHI = \mathbf{w}^\top \mathbf{w}     = \|\mathbf{w}\|_2^2
+$$
+
+Matrix form –
+
+Let $\mathbf{1}$ be a vector of ones. Then:
+
+$$
+\begin{align}\mathbf{w} &= \frac{\mathbf{V}}{\mathbf{1}^\top \mathbf{V}} \\HHI &= \mathbf{V}^\top \mathbf{V} / (\mathbf{1}^\top \mathbf{V})^2\end{align}
+$$
+
+**Bounds:**
+
+If $J = |\mathcal{J}|$ industries:
+
+Perfect diversification –
+
+$$
+w_j = \frac{1}{J},
+$$
+
+$$
+HHI = \frac{1}{J}
+$$
+
+Complete concentration -
+
+$$
+w_k = 1, \quad w_{j \ne k} = 0,
+$$
+
+$$
+HHI = 1
+$$
+
+Therefore:
+
+$$
+\frac{1}{J} \le HHI \le 1
+$$
+
+**Scaled HHI:**
+
+$$
+HHI_{\text{scaled}} = 10{,}000 \times HHI
+$$
+
+**Effective Number of Industries:**
+
+Effective Number of Industries –
+
+$$
+N_{\text{eff}} = \frac{1}{HHI}
+$$
+
+**Complete Compact Expression:**
+
+$$
+\boxed{HHI=\sum_{j \in \mathcal{J}}\left(\frac{\sum_{i \in j} v_{ij}}{\sum_{k \in \mathcal{J}} \sum_{i \in k} v_{ik}}\right)^2}
+$$
+
+Other measures of interest (that will not be treated at this time):
+
+• entropy diversification measure\
+• Gini concentration\
+• continuous limit formulation\
+• Beamer slides
+
+**Key outputs:**
+
+-   top industry exposures
+
+-   concentration rankings
+
+-   HHI statistic
+
+**Purpose:**\
+Detect overexposure to specific industries or economic sectors.
+
+Is the portfolio concentrated?
+
+```{r}
+
+sector <- portfolio_df |>
+  group_by(minor_industry_name) |>
+  summarise(value = sum(base_market_value)) |>
+  mutate(weight = value / sum(value)) |>
+  arrange(desc(weight))
+
+head(sector, 10) # displaying the top 10 sectors
+```
+
+Herfindahl Index (HHI):
+
+```{r}
+
+HHI <- sum(sector$weight^2)
+HHI
+
+```
+
+Interpretation:
+
+-   $HHI\,<0.10$: Diversified (**barely in this case**)
+
+-   $0.10\,\leq\,HHI\leq\,0.25$: Moderate
+
+-   $HHI\,>\,0.25$: Concentrated
+
+Visualization of dispersed capital:
+
+```{r}
+
+ggplot(head(sector, 10),
+       aes(minor_industry_name, value)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = dollar)
+
+```
+
+## Gain/Loss Performance Analysis
+
+Measure:
+
+-   How much value was gained or lost, and where did it come from?
+
+Using unrealised gains and total cost data, to compute security-level returns and aggregate performance across sectors and asset classes.
+
+Desirables:
+
+1.  Security Returns
+
+2.  Weighted Portfolio Return
+
+3.  Group/Sector Attribution
+
+4.  Risk/Dispersion
+
+**Key outputs:**
+
+-   average returns by group
+
+-   profit/loss attribution
+
+-   return distributions
+
+**Purpose:**\
+Identify underperforming segments and drivers of portfolio losses.
+
+### Security-Level Definition
+
+For each security $i$:
+
+$MV_i$ : base_market_value
+
+$C_i$ : base_total_cost
+
+$G_i$ : base_unrealized_gain_loss
+
+**Identity (must hold):**
+
+$$
+MV_i\,=\,G_i\,+C_i
+$$
+
+**Security Return:**
+
+Simple holding return –
+
+$$
+r_i\,=\,\frac{G_i}{C_i}
+$$
+
+Interpretation:
+
+-   positive $\rightarrow$ gain
+
+-   negative $\rightarrow$ loss
+
+```{r}
+
+r_i <- portfolio_df$base_unrealized_gain_loss / portfolio_df$base_total_cost
+```
+
+### Portfolio Weights
+
+Total portfolio market value:
+
+$$
+V = \sum_{i=1}^{N} MV_i
+$$
+
+Weight of each security:
+
+$$
+w_i\,=\,\frac{MV_i}{V}
+$$
+
+These weights sum to 1.
+
+### Portfolio Return
+
+Standard portfolio return:
+
+$$
+R_p = \sum_{i=1}^{N} w_i r_i
+$$
+
+This is known as the **value-weighted performance.**
+
+Alternative equivalent form (and usually easier):
+
+$$
+\sum G_i = \text{Total Gain}
+$$
+
+We can compute:
+
+$$
+R_p = \frac{\sum G_i}{\sum C_i}
+$$
+
+Both formulas are mathematically equivalent.
+
+```{r}
+
+portfolio_return <-
+  sum(portfolio_df$local_unrealized_gain_loss) /
+  sum(portfolio_df$base_total_cost)
+
+portfolio_return
+```
+
+### Group / Sector Attribution
+
+Grouping securities into sectors/industry $g$.
+
+Let:
+
+$$
+G_g = \sum_{i \in g} G_i
+$$
+
+$$
+C_g = \sum_{i \in g} C_i
+$$
+
+define **group-level aggregation sums** (very common in portfolio, sector, or industry grouping).
+
+$i\in\,g$ = assets belonging to group $g$
+
+$G_i$ = gain/loss for asset $i$
+
+$C_i$ = cost for asset $i$
+
+Sector return:
+
+$$
+R_g=\frac{G_g}{C_g}
+$$
+
+Sector weight:
+
+$$
+W_g =\frac {\sum_{i \in g} MV_i}{V}
+$$
+
+Contribution to portfolio:
+
+$$
+\text{Contribution}_g=W_g\,\times\,R_g
+$$
+
+Key property:
+
+$$
+R_p = \sum_{g} \text{Contribution}_g
+$$
+
+So contributions add up exactly.
+
+```{r}
+
+sector_perf <- portfolio_df |>
+  group_by(minor_industry_name) |>
+  summarise(
+    gain  = sum(base_unrealized_gain_loss),
+    cost  = sum(base_total_cost),
+    value = sum(base_market_value)
+  ) |>
+  mutate(
+    sector_return = gain / cost,
+    weight = value / sum(value),
+    contribution = weight * sector_return
+  )
+dim(sector_perf)
+
+sector_perf
+```
+
+### Risk / Dispersion Measures
+
+Performance is incomplete without volatility.
+
+Cross-sectional variance:
+
+$$
+\sigma_p^2 = \sum_{i} w_i (r_i - R_p)^2
+$$
+
+with standard deviation:
+
+$$
+\sigma_p=\sqrt{\sigma{_p}^2}
+$$
+
+Measures dispersion of gains/losses.
+
+For holdings portfolios, returns should use **market value**, not cost basis. Hence:
+
+$$
+r_i=\frac{\text{unrealised gain}_i}{\text{market value}_i}
+$$
+
+because:
+
+-   weights are already market value based
+
+-   avoids near-zero denominators
+
+-   aligns with portfolio theory
+
+-   industry standard
+
+```{r}
+
+ri <- portfolio_df$base_unrealized_gain_loss /
+      portfolio_df$base_market_value
+
+wi <- portfolio_df$base_market_value /
+      sum(portfolio_df$base_market_value)
+
+Rp <- sum(wi * ri, na.rm = TRUE)
+
+sigma <- sqrt(sum(wi * (ri - Rp)^2, na.rm = TRUE))
+
+sigma
+
+```
+
+Interpreting it:
+
+$$
+\sigma_p=0.3836\,\approx\,38.36\%
+$$
+
+meaning the portfolio’s **weighted return volatility ≈ 38%**.
+
+Such is:
+
+-   high for broad equity indexes (10–20%)
+
+-   normal for concentrated, distressed, small-cap, or alternatives-heavy portfolios
+
+Further observation of $r_i$ :
+
+```{r}
+
+summary(ri)
+quantile(ri, c(.9, .95, .99, .999), na.rm=TRUE)
+max(abs(ri), na.rm=TRUE)
+
+```
+
+Observed is division by 0 for $r_i$ , say, encountering cases of market_value = 0.
+
+```{r}
+
+sum(portfolio_df$base_market_value == 0, na.rm = TRUE)
+```
+
+From a portfolio perspective, **zero market value positions should never be included** anyway:
+
+-   closed lots
+
+-   matured bonds
+
+-   accounting stubs
+
+-   derivatives that expired
+
+They contribute **no weight**, so they should be excluded. Mathematical structure implied:
+
+$$
+V = \{\, i \mid V_i > 0 \,\}
+$$
+
+$$
+r_i = \frac{\Delta V_i}{V_i}
+$$
+
+$$
+w_i = \frac{V_i}{\sum_{j \in V} V_j}
+$$
+
+Such above three conditions can be viewed as the standard portfolio return definition.
+
+**financial Interpretation:**
+
+Positions with **zero market value** are:
+
+-   fully liquidated
+
+-   matured bonds
+
+-   written-off assets
+
+-   accounting residuals
+
+-   stale records
+
+Economically:
+
+$$
+V_i=0\,\rightarrow\,w_i=0
+$$
+
+So they **should not exist in the portfolio return calculation at all**.
+
+```{r}
+
+
+result <- portfolio_df |>
+  filter(base_market_value > 0) |>
+  mutate(
+    r = base_unrealized_gain_loss / base_market_value,
+    w = base_market_value / sum(base_market_value)
+  ) |>
+  summarise(
+    Rp = sum(w * r),
+    sigma = sqrt(sum(w * (r - Rp)^2))
+  )
+
+result
+
+```
+
+```{r}
+
+summary(ri)
+quantile(ri, c(.9, .95, .99, .999), na.rm=TRUE)
+max(abs(ri), na.rm=TRUE)
+```
+
+There's still divergence and NA issues.
+
+**One must filter out zero market value positions** **BEFORE** calculating returns:
+
+```{r}
+
+puff <- portfolio_df |>
+  filter(base_market_value > 0)   # remove zero market value rows
+
+ri <- puff$base_unrealized_gain_loss / puff$base_market_value
+wi <- puff$base_market_value / sum(puff$base_market_value)
+
+Rp <- sum(wi * ri)
+sigma <- sqrt(sum(wi * (ri - Rp)^2))
+
+summary(ri)
+sigma
+
+```
+
+the **financially feasible portfolio return and volatility formulas**
+
+Portfolio return $R_p$:
+
+$$
+R_p = \sum_{i \in \mathcal{V}} w_i \, r_i, \quad
+$$
+
+where:
+
+$$
+r_i = \frac{\text{base_unrealized_gain_loss}_i}{\text{base_market_value}_i}, \quad
+$$
+
+$$
+w_i = \frac{\text{base_market_value}_i}{\sum_{j \in \mathcal{V}} \text{base_market_value}_j}, \quad
+$$
+
+$$
+\mathcal{V} = \{ i : \text{base_market_value}_i > 0 \}
+$$
+
+$$
+\sigma_p = \sqrt{ \sum_{i \in \mathcal{V}} w_i \, \big(r_i - R_p\big)^2 }
+$$
+
+### Loss Probability Metric (Risk View)
+
+Relatable to a logit/probit model–
+
+$$
+P(\text{loss})=\frac{1}{N}\sum{I(G_i<0)}
+$$
+
+```{r}
+
+mean(df_latest$base_unrealized_gain_loss < 0)
+
+```
+
+Interpretation:
+
+\% of securities underwater.
+
+## Return Modeling & Loss Prediction (Machine Learning)
+
+This area frames portfolio risk as a predictive problem. Using security characteristics (interest rate, size, sector, asset class), to build a classification model (like logit and/or probit) to predict whether a holding will experience a loss.
+
+**Key outputs:**
+
+-   logistic/probit regression model
+
+-   loss probability predictions
+
+-   ROC/AUC performance metrics
+
+**Purpose:**\
+Demonstrate predictive risk analytics similar to credit and portfolio risk models used in banking and asset management.
+
+Review of dataset attributes:
+
+```{r}
+ glimpse(portfolio_df)
+```
+
+### Logit Model Development
+
+**Rationale for a Binary Classification Model with** **Base Unrealized Gain/Loss**
+
+*Base Unrealized Gain/Loss*: sets forth the unrealised gain or loss in value of the investment since acquisition. With the following underlying definition:
+
+$$
+\text{Base P&L}_i=\text{Base Market Value}_i-\text{Base Total Cost}_i
+$$
+
+Measures how much money gained or lost (USD).
+
+To develop a binary loss indicator when you’re modeling portfolio loss probability using base currency:\
+
+$$
+\text{loss_flag}_i =\begin{cases}1, & \text{if } \text{Base Unrealized Gain/Loss}_i < 0, \\0, & \text{otherwise}.\end{cases}
+$$
+
+So, there's modelling for:
+
+$$
+\text{Pr}(\text{Loss}\,|\,X)
+$$
+
+which appeases logit.
+
+Features prematurely identified/selected (may introduce **"status quo bias"**):
+
+1.  interest_rate
+
+2.  value
+
+3.  industry
+
+4.  asset class
+
+5.  cost
+
+Thoughts on each feature in **economic / risk-model terms**, using the portfolio fields from the NYC Comptroller BERS dataset. Well, concerning a **logit/probit loss model**, each variable should represent a **distinct risk channel** (price risk, size risk, sector risk, etc.).
+
+-   *Interest Rate*:
+
+    Captures rate sensitivity or income characteristics
+
+    Economically: coupon yield (bonds) and dividend/financing proxy (equities whether PBOs or private equity may exhibit 0)
+
+    Risk interpretation:
+
+    higher rates $\rightarrow$ greater interest income leeway
+
+    yet $\rightarrow$ higher duration risk (price drops when rates rise)
+
+    Can capture sentiment for the economy
+
+    In terms of modelling
+
+    Captures:
+
+    carry risk + rate sensitivity
+
+    Useful for:
+
+    fixed income loss prediction
+
+    macro sensitivity
+
+    rate regime effects
+
+    Less informative for:
+
+    common equities (mostly zeros)
+
+-   *Value (base market value)*:
+
+    Such captures current exposure size
+
+    $$
+    \text{Value}_i=\text{current market-to-market}
+    $$
+
+Risk meaning:
+
+larger positions $\rightarrow$ larger absolute losses
+
+drives portfolio concentration
+
+In terms of modelling
+
+Captures:
+
+position size / scale risk
+
+Essential for:
+
+expected loss aggregation
+
+concentration effects
+
+Customarily used to compute loss rate:
+
+$$
+\text{loss rate} =\frac{\text{loss}}{\text{value or cost}}
+$$
+
+-   *Industry*:
+
+```         
+Captures systematic sector risk
+
+Economically:
+
+Common shocks
+
+Correlated losses
+
+Examples:
+
+Energy $\rightarrow$ oil price risk
+
+Financials $\rightarrow$ credit/liquidity risk
+
+Technology $\rightarrow$ valuation/momentum risk
+
+In terms of modelling
+
+Captures:
+```
+
+$$
+\text{sector beta}\,/\,\text{co-movement risk}
+$$
+
+Such is usually predictive because losses often cluster by industry.
+
+-   *Asset Class*:
+
+    Captures instrument structure risk
+
+    Economically:
+
+    payoff shape
+
+    seniority
+
+    volatility
+
+    Examples
+
+    Equity $\rightarrow$ high volatility, residual claim
+
+    Bonds $\rightarrow$ lower volatility, fixed payments
+
+    Private equity $\rightarrow$ illiquidity risk
+
+    In terms of modelling
+
+    Captures:
+
+$$
+\text{structural risk regime}
+$$
+
+Typically the **strongest categorical predictor** because equities lose more often than investment grade bonds.
+
+-   *Cost (base_total_cost)*:
+
+    Captures Capital at risk / basis
+
+    $$
+    \text{Cost}_i=\text{amount invested}
+    $$
+
+    Risk ideas:
+
+    defines exposure magnitude
+
+    determines unrealised gain\\loss
+
+    normalises returns
+
+    In terms of modelling
+
+    Captures:
+
+    $$
+    \text{exposure scale + entry price anchor}
+    $$
+
+    Customarily used to compute returns:
+
+    $$
+    \text{return}_i=\frac{\text{gain/loss}}{\text{cost}}
+    $$
+
+    Also, to weight expected loss:
+
+    $$
+    EL=P(\text{loss})\,\times\,\text{cost,}
+    $$
+
+    cost behaving like random variable.
+
+**The Implicit Big Picture Models**
+
+$$
+\text{Pr(loss)}=f(\,\underbrace{rate}_{macro}\,,\underbrace{value,cost}_{size}\,,\underbrace{industry}_{sector}\,,\underbrace{asset class}_{structure}\,)
+$$
+
+**Common Binary Response Setup for Logit Model (scalar form)**
+
+For observation $i$:
+
+$$
+y\in\{0,1\}
+$$
+
+Linear index:
+
+$$
+z_i = \beta_0 + \beta_1 x_{i1} + \beta_2 x_{i2} + \cdots + \beta_k x_{ik}
+$$
+
+Probability form:
+
+$$
+P(y_i = 1 \mid x_i)=\frac{1}{1 + e^{-z_i}}
+$$
+
+$$
+P(y_i = 0 \mid x_i)=1 - \frac{1}{1 + e^{-z_i}}
+$$
+
+Odds:
+
+$$
+\frac{P(y_i=1 \mid x_i)}{P(y_i=0 \mid x_i)} = e^{z_i}
+$$
+
+Log-odds (logit link):
+
+$$
+\log \left( \frac{P(y_i=1 \mid x_i)}{1 - P(y_i=1 \mid x_i)} \right)=\beta_0 + \beta_1 x_{i1} + \cdots + \beta_k x_{ik}
+$$
+
+**The Explicit Logit Probability Model (scalar form)**
+
+$$
+W\,=\,\beta_0 + \beta_1 \cdot \text{interest_rate}_i+ \beta_2 \cdot \text{value}_i+ \beta_3 \cdot \text{cost}_i+ \sum_{j=1}^{J} \gamma_j \cdot \text{industry}_{ij}+ \sum_{k=1}^{K} \delta_k \cdot \text{asset_class}_{ik}
+$$
+
+$$
+\Pr(\text{loss}_i = 1 \mid X_i) = \frac{1}{1 + \text{e}^{-W}}
+$$
+
+$\text{Pr}(\text{loss}_i\,=\,1\,|\,X_i)$ — probability that position $i$ experiences a loss.
+
+$\beta_0$ — intercept.
+
+$\beta_1\,,\,\beta_2\,,\,\beta_3$ — coefficients for numeric predictors interest rate, value, cost, respectively.
+
+$\gamma_j$ — coefficients for the one-hot encoded industry categories $(J\,\,\text{total})$.
+
+$\delta_k$ — coefficients for the one-hot encoded asset_class categories $(K\,\,\text{total})$.
+
+\
+**Return / Loss Prediction Using Logit/Probit Models with the Tidymodels Library in R**
+
+-   **Numerical:** `interest_rate`, `value`, `cost`
+
+-   **Categorical:** `major_industry_name` (or `minor_industry_name`), `asset_class`
+
+-   **Target:** define a binary loss flag, e.g., **loss occurred** (`1` if `base_unrealized_gain_loss < 0`)
+
+```{r}
+glimpse(portfolio_df)
+```
+
+Preparing the data:
+
+```{r, message=FALSE, warning=FALSE}
+
+library(tidymodels) # includes parsnip, recipes, workflows, rsample, yardstick
+library(dplyr)
+
+# Data Preparation
+return_loss_df <- portfolio_df |>
+  mutate(# prepration for categorical classes
+    loss_flag = factor(base_unrealized_gain_loss < 0,
+                      levels = c(FALSE, TRUE),
+                      labels = c("gain", "loss")), 
+    major_industry_name = as.factor(major_industry_name),
+    asset_class = as.factor(asset_class)
+  ) |>  
+  dplyr::select(# attributes of interest for the parametric classification model(s)
+    interest_rate, 
+    value = base_market_value, 
+    cost = base_total_cost, 
+    major_industry_name, 
+    asset_class, 
+    loss_flag
+  ) 
+```
+
+Train-Test Split:
+
+```{r}
+
+set.seed(42) 
+    # Ensures that the same sequence of "random" numbers is generated every time the code runs, which is crucial for reproducibility and debugging. 
+split <- initial_split(return_loss_df, prop = 0.8, strata = loss_flag) 
+    # 80% of data for training, while remaining serves towards the testing the model 
+train_data <- training(split)
+test_data  <- testing(split)
+
+```
+
+```{r}
+names(train_data)
+```
+
+Recipe (Feature Preprocessing):
+
+```{r}
+
+library(themis)
+
+# Using tidymodels’ recipe to prepare features:
+loss_recipe <- recipe(loss_flag ~ ., data = train_data) |>
+  step_other(all_nominal_predictors(), threshold = 0.02) |>  
+      # lump rare (categorical)
+  step_dummy(all_nominal_predictors()) |> 
+      # REQUIRED for glmnet
+  step_normalize(all_numeric_predictors()) |>
+      # Standardize numerical features
+  step_smote(loss_flag)
+      # balance classes via SMOTE
+
+```
+
+**Use of SMOTE (Synthetic Minority Oversampling Technique) in prior**
+
+SMOTE is a method to **balance class distributions** in a classification dataset. Mathematically:
+
+Let the minority class have examples:
+
+$$
+\chi_\text{minor}=\{x_1\,,x_2\,,...,\,x_N\},\,\,\,x_i\,\in\,\mathbb{R}^p 
+$$
+
+For eaxch minority sample $x_i$ :
+
+1.  Find the k nearest neighbours in feature space , $\text{NN}_k(x_i)$
+2.  Randomly select a neighbour $x_{\text{nn}}$
+3.  Generate a synthetic sample along the "line segment":
+
+$$
+x_{\text{new}}=x_i\,+\,\delta\,\cdot\,(x_{\text{nn}}-x_i),\,\,\,\,\delta\,\sim\,U(0,1)
+$$
+
+This generates new synthetic minority points to balance the dataset.
+
+The original data distribution is preserved, but minority class is oversampled.
+
+The model sees **more examples of the minority class**, reducing bias toward the majority class (`gain` in the portfolio).
+
+**Logistic Model Specification (Ridge Logit Regression - L2 Regularisation)**
+
+Logit / logistic regression predicts the probability of loss versus gain:
+
+$$
+p(y_i = 1 \mid x_i) = \frac{1}{1 + \exp(-x_i^\top \beta)}
+$$
+
+Ridge adds an **L2 penalty** to the log-likelihood:
+
+$$
+\hat{\beta} = \arg\max_{\beta} \left\{ \ell(\beta) - \lambda \sum_{j=1}^{p} \beta_j^2 \right\}
+$$
+
+where:
+
+$$
+\ell(\beta) = \sum_{i=1}^{n} \Big[ y_i \log p_i + (1 - y_i) \log (1 - p_i) \Big]
+$$
+
+is the common logistic log-likelihood;
+
+$\lambda\,\geq\,0$ is the ridge penalty (controlled via `penalty` in `glmnet`)
+
+**Intuition:**
+
+-   **Shrink coefficients** toward zero → reduces overfitting
+
+-   Handles **multicollinearity** in predictors (like `value`, `cost`, industry dummies)
+
+-   Works well with **many categorical dummies** (one-hot encoded variables)
+
+```{r}
+
+library(glmnet)
+
+logit_spec <- logistic_reg(
+  mode = "classification",
+  penalty = tune(),   # lambda is tunable
+  mixture = 0         # Ridge (alpha=0)
+) |> 
+  set_engine("glmnet")
+```
+
+Workflow Setup:
+
+```{r}
+
+logit_workflow <- workflow() |>
+  add_recipe(loss_recipe) |>
+  add_model(logit_spec)
+  
+```
+
+Cross-validation for choosing lambda:
+
+```{r}
+
+set.seed(123)  # Ensures that the same sequence of "random" numbers is generated every time the code runs, which is crucial for reproducibility and debugging. 
+cv_folds <- vfold_cv(train_data, v = 5)
+
+# Create a grid of lambda values (log-scale)
+lambda_grid <- grid_regular(penalty(range = c(-4, 0)), levels = 20)
+
+tune_res <- tune_grid(
+  logit_workflow,
+  resamples = cv_folds,
+  grid = lambda_grid,
+  metrics = metric_set(roc_auc)
+)
+```
+
+Select best lambda:
+
+```{r}
+
+best_lambda <- select_best(tune_res, metric = "roc_auc")
+best_lambda
+
+```
+
+Final workflow:
+
+```{r}
+
+final_workflow <- finalize_workflow(logit_workflow, best_lambda)
+```
+
+Fitting the model:
+
+```{r}
+library(glmnet)
+
+logit_fit <- fit(final_workflow, data = train_data) 
+      # logit model fit with training data
+
+```
+
+Logit Model Characteristics:
+
+```{r}
+
+fit_obj <- extract_fit_parsnip(logit_fit)$fit
+coef(fit_obj, s = 1e-04)  # specify penalty lambda if you used regularization
+
+```
+
+Predicted Probabilities:
+
+```{r}
+
+# Making predictions based on the features of the test set. Each instance (row) concerning the features is a test case (scenario):
+
+# Probabilities on test set
+preds <- predict(logit_fit, new_data = test_data, type = "prob") |> 
+  bind_cols(test_data)
+
+preds
+```
+
+Evaluating performance:
+
+```{r}
+
+# Predictions (probabilities)
+preds <- predict(logit_fit, new_data = test_data, type = "prob") |> 
+  bind_cols(test_data)
+
+# ROC / AUC evaluation
+roc_auc(preds, truth = loss_flag, .pred_loss)
+
+#  Confusion matrix (needs hard classes)
+conf_tbl <- tibble(
+  truth    = preds$loss_flag,
+  estimate = ifelse(preds$.pred_loss >= 0.5, "loss", "gain") |> factor(levels = c("gain","loss"))
+)
+
+conf_mat(conf_tbl, truth = truth, estimate = estimate)
+
+```
+
+**ROC \\ AUC**
+
+A roc_auc value of 0.278:
+
+-   deemed low
+
+-   SMOTE helped balance classes, but your model **still struggles to separate `loss` from `gain`**.
+
+-   Likely causes:
+
+    Weak predictive signal in the current features (`interest_rate`, `value`, `cost`, `major_industry_name`, `asset_class`)
+
+    High overlap of numeric values between `loss` and `gain`
+
+**Confusion Matrix**
+
+-   True Positives (`loss` correctly predicted): 810
+
+-   False Negatives (`loss` predicted as gain): 633
+
+-   False Positives (`gain` predicted as loss): 343
+
+-   True Negatives (`gain` correctly predicted): 933
+
+-   Accuracy ≈ (933 + 810) / total ≈ 0.62
+
+-   misclassifies a lot of `loss` observations
+
+**Feature Importance**
+
+Concerns for identifying the features which most explain the variability of the target.
+
+```{r}
+
+library(tidymodels)
+library(dplyr)
+
+#  Extract the parsnip model
+final_model <- logit_fit |>
+  extract_fit_parsnip()
+glmnet_fit <- final_model$fit
+
+#  Extract the lambda actually used in the fit
+# Use the fitted penalty from the final workflow
+lambda_used <- logit_fit$pre$mold$spec$fit$penalty
+
+#  Extract coefficients at that lambda
+coef_sparse <- coef(glmnet_fit, s = lambda_used)
+
+#  Convert to tidy tibble
+feature_importance <- tibble(
+  feature = rownames(coef_sparse),
+  coefficient = as.numeric(coef_sparse[,1])  # ensure single column numeric
+) |>
+  filter(feature != "(Intercept)") |>
+  mutate(abs_coef = abs(coefficient)) |>
+  arrange(desc(abs_coef))
+
+# View top features
+feature_importance |>
+  slice_head(n = 20)
+
+```
+
+### Feature Importance Upon a Broad Set of Features
+
+Will now incorporate more features that are highly unique in character concerning securities in trade.
+
+Applying now **filter-based feature selection**, which relies on the statistical relationship between individual features and the target variable without the overhead of a specific machine learning model.
+
+Mathematically, `FeSelectorRcpp` primarily implements algorithms based on **Information Theory**.
+
+1.  Entropy: The Foundation of Uncertainty
+
+    Before determining if a feature is important, one must measure the "disorder" or uncertainty of the target variable $Y$. Such is accomplished using **Shannon Entropy**:
+
+    $$
+    H(Y) = -\sum_{y \in \mathcal{Y}} p(y) \log_2 p(y)
+    $$
+
+    where:
+
+    $p(y)$ is the probability of the target taking a specific value.
+
+    The higher the entropy, the more "unpredictable" securities in the dataset are.
+
+2.  Information Gain (IG)
+
+    It measures how much the entropy of the target $Y$ decreases after observing a feature $X$.
+
+    Mathematically, it is the difference between the original entropy and the **Conditional Entropy**:
+
+    $$
+    IG(X)=H(Y)-H(Y|X)
+    $$
+
+    where $H(Y|X)$ is the average uncertainty remaining in the target after accounting for the feature:
+
+    $$
+    H(Y \mid X)=\sum_{x \in \mathcal{X}} p(x)\, H(Y \mid X = x)
+    $$
+
+3.  Dealing with Bias: Gain Ratio
+
+    Standard Information Gain has a known flaw: it prefers features with many unique values (e.g., a "Securities ID" would look perfect because it's unique, but it has no predictive power for new data).
+
+    To rectify this, `there's` often use of the **Gain Ratio**, which normalises the Information Gain by the entropy of the feature itself (Intrinsic Info):
+
+    $$
+    GR(X)=\frac{IG(X)}{H(X)}
+    $$
+
+    By dividing by $H(X)$, there's penalize on the features that have too many distinct categories, ensuring the "importance" is derived from actual patterns rather than just high cardinality.
+
+4.  Symmetry uncertainty
+
+    Another robust measure included is **Symmetric Uncertainty (SU)**. This scales the Information Gain to a range of $[0,1]$, making it easier to compare features across different datasets:
+
+    $$
+    SU(X,Y)=2\,\cdot\,\frac{IG(X,Y)}{H(x)+Y(y)}
+    $$
+
+    -   **0**: Feature and target are completely independent.
+
+    -   **1**: The feature perfectly predicts the target.
+
+First, changing the local_market_value from chr to dbl because it's more meaningful in the latter form:
+
+```{r}
+
+library(dplyr)
+
+portfolio_df <- portfolio_df |>
+  mutate(local_market_value = as.double(local_market_value))
+
+```
+
+Expansion with features:
+
+```{r}
+
+# Data Preparation
+FS_prospect_features <- portfolio_df |>
+  mutate(# prepration for categorical classes
+    loss_flag = factor(base_unrealized_gain_loss < 0,
+                      levels = c(FALSE, TRUE),
+                      labels = c("gain", "loss")), 
+    major_industry_name = as.factor(major_industry_name),
+    asset_class = as.factor(asset_class),
+    local_currency_code = as.factor(local_currency_code)
+  ) |>  
+  dplyr::select(# expanded feature set
+    interest_rate, 
+    value = base_market_value, 
+    cost = base_total_cost, 
+    major_industry_name, 
+    asset_class, 
+    shares_par_value,
+    base_accrued_interest,
+    local_market_value,
+    local_total_cost_amount,
+    local_unrealized_gain_loss,
+    local_currency_code,
+    loss_flag
+  ) 
+```
+
+Observation of the attributes:
+
+```{r}
+
+glimpse(FS_prospect_features)
+```
+
+Feature Importance development.
+
+`FSelectorRcpp` is specifically designed to handle **factors** (categorical data) natively because its underlying mathematical framework is based on Information Theory.
+
+Unlike many machine learning algorithms that require you to manually "One-Hot Encode" or "Dummy Code" your variables, `FSelectorRcpp` prefers factors.
+
+The package treats each level of a factor as a distinct state in the probability distribution. When calculating Entropy $H(X)$, it simply counts the frequency of each factor level to determine $p(x)$.
+
+If you provide **numeric** features, `FSelectorRcpp` will typically **discretize** them internally (often using the MDL - Minimum Description Length method) to turn them into categorical-like bins. This is because Shannon Entropy is natively defined for discrete distributions.
+
+-   **Factors:** Processed directly as discrete sets.
+
+-   **Numerics:** Automatically binned so that Information Gain can be calculated.
+
+However, will encode factor attributes, because in the future will likely apply machine learning models that operate on quantitative values.
+
+```{r}
+
+library(dplyr)
+ 
+# Identify the factor columns you want to encode
+factor_cols <- c("major_industry_name", "asset_class", "local_currency_code", "loss_flag")
+
+# Convert factors to integer codes
+FS_encoded <- FS_prospect_features |>
+  mutate(across(all_of(factor_cols), ~ as.integer(.)))
+# View first rows
+
+glimpse(FS_encoded)
+```
+
+```{r}
+
+# Load necessary libraries (if not accounted for with tidyverse)
+
+library(FSelectorRcpp)
+library(dplyr)
+library(ggplot2)
+
+# ======================================================
+# 1. Build formula
+# ======================================================
+feature_formula <- as.formula(
+  paste("loss_flag ~",
+        paste(setdiff(names(FS_encoded), "loss_flag"), collapse = " + "))
+)
+
+
+# ======================================================
+# 2. Compute Information Gain
+# ======================================================
+feature_importance <- information_gain(
+  feature_formula,
+  data = FS_encoded, type = "gainratio"
+)
+
+
+cat("\n============================================\n")
+cat("Feature Importance — Original Column Order\n")
+cat("============================================\n")
+
+print(feature_importance)
+
+
+
+# ======================================================
+# 3. Rank features
+# ======================================================
+feature_ranked <- feature_importance |>
+  arrange(desc(importance))
+
+
+cat("\n============================================\n")
+cat("Feature Importance — Ranked (High → Low)\n")
+cat("============================================\n")
+
+print(feature_ranked)
+
+
+
+# ======================================================
+# 4. Method A — Top N features
+# ======================================================
+N <- 10
+
+topN <- feature_ranked |>
+  slice_head(n = N)
+
+cat("\n============================================\n")
+cat(paste0("Top ", N, " Features\n"))
+cat("Purpose: fixed-size dimensionality reduction\n")
+cat("============================================\n")
+
+print(topN)
+
+
+
+# ======================================================
+# 5. Method B — Importance threshold
+# ======================================================
+threshold <- 0.02
+
+thresh_feats <- feature_ranked |>
+  filter(importance >= threshold)
+
+cat("\n============================================\n")
+cat(paste0("Features with importance >= ", threshold, "\n"))
+cat("Purpose: remove weak/noisy predictors\n")
+cat("============================================\n")
+
+print(thresh_feats)
+
+
+
+# ======================================================
+# 6. Method C — Top percentage rule
+# ======================================================
+pct <- 0.10  # top 10%
+
+k <- ceiling(nrow(feature_ranked) * pct)
+
+top_pct_feats <- feature_ranked |>
+  slice_head(n = k)
+
+cat("\n============================================\n")
+cat(paste0("Top ", pct*100, "% of Features\n"))
+cat("Purpose: scale with dataset size\n")
+cat("============================================\n")
+
+print(top_pct_feats)
+
+
+
+# ======================================================
+# 7. Method D — Cumulative importance cutoff
+# ======================================================
+feature_cum <- feature_ranked |>
+  mutate(cum_importance = cumsum(importance) / sum(importance))
+
+cutoff <- 0.90
+
+cum_feats <- feature_cum |>
+  filter(cum_importance <= cutoff)
+
+cat("\n============================================\n")
+cat(paste0("Cumulative Importance <= ", cutoff*100, "%\n"))
+cat("Purpose: keep minimal features explaining most information\n")
+cat("============================================\n")
+
+print(cum_feats)
+
+
+
+# ======================================================
+# 8. Create reduced datasets automatically
+# ======================================================
+make_subset <- function(df, feats) {
+  select(df, all_of(c("loss_flag", feats$attributes)))
+}
+
+FS_topN      <- make_subset(FS_encoded, topN)
+FS_thresh    <- make_subset(FS_encoded, thresh_feats)
+FS_topPct    <- make_subset(FS_encoded, top_pct_feats)
+FS_cum       <- make_subset(FS_encoded, cum_feats)
+
+cat("\nDataset shapes after reduction:\n")
+cat("TopN      :", dim(FS_topN), "\n")
+cat("Threshold :", dim(FS_thresh), "\n")
+cat("TopPct    :", dim(FS_topPct), "\n")
+cat("Cumulative:", dim(FS_cum), "\n")
+
+
+
+# ======================================================
+# 9. Importance bar plot
+# ======================================================
+cat("\nGenerating importance bar chart...\n")
+
+ggplot(feature_ranked,
+       aes(x = reorder(attributes, importance),
+           y = importance)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Feature Importance (Information Gain)",
+       x = "Feature",
+       y = "Importance")
+
+```
+
+### Class Probability Outputs with Random Forest Compared to glmnet Logit
+
+An aim is to outperform linear logit because:
+
+1.  Logit $\rightarrow$ linear boundary
+2.  RF $\rightarrow$ nonlinear splits
+
+**Random Forest**
+
+A Random Forest is an **ensemble** of decision trees. It improves prediction accuracy by averaging the results of many individual trees, which reduces the risk of overfitting.
+
+The structure relies on two main mathematical techniques:
+
+-   **Bagging (Bootstrap Aggregation):** Each tree is trained on a random sample of the data, drawn with replacement.
+
+-   **Feature Randomness:** At each split in a tree, only a random subset of features is considered.
+
+#### Individual Tree Prediction
+
+For a single decision tree $h_k(x)$, the prediction for an input $x$ is based on the terminal node (leaf) the data point falls into.
+
+#### Forest Aggregation (Regression)
+
+For regression tasks, the Forest prediction $H(x)$ is the numerical average of all $K$ trees:
+
+$$
+H(x) = \frac{1}{K} \sum_{k=1}^{K} h_k(x)
+$$
+
+For classification, the forest uses **Majority Voting**. The predicted class $\hat{Y}$ is the one that receives the most "votes" from the individual trees:
+
+$$
+\hat{Y} = \text{arg max}_{y} \sum_{k=1}^{K} I(h_k(x) = y)
+$$
+
+Where $I(\cdot)$ is the indicator function, which equals 1 if the tree predicts class $y$ and 0 otherwise.
+
+Decision trees within the forest usually split nodes by minimizing **Gini Impurity** ($G$). For a set of items with $J$ classes, the probability of an item being classified into class $i$ is $p_i$:
+
+$$
+G = 1 - \sum_{i=1}^{J} p_i^2
+$$
+
+One may directly compare
+
+-   ROC AUC
+
+-   PR AUC
+
+-   Calibration
+
+across such the RF model.
+
+First, observation is mostly for the numeric attributes w.r.t. loss_flag (being the target), to observe skew, kurtosis and linearity level:
+
+```{r, message=FALSE, warning=FALSE}
+
+library(GGally)
+library(ggplot2)
+
+vars_of_interest <- FS_encoded |>
+  select(-major_industry_name, -asset_class)
+
+ggpairs(vars_of_interest,
+        upper = list(continuous = wrap("cor", size = 3)),  # show correlation
+        lower = "blank",                                   # hide scatterplots
+        diag  = list(continuous = wrap("densityDiag")),    # distributions
+        axisLabels = "show") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+        axis.text.y = element_text(size = 6),
+        strip.text = element_text(size = 7))
+
+```
+
+**NOTE:** the Pearson Product-Moment Correlation becomes identical to a Point-Biserial Correlation when one of the two variables is continuous (metric) and the other is **dichotomous (binary)**. 
+
+From prior observation, it's likely that any logit model will not perform as well as the ensemble models due to observation of lack of underlying linearity, along with skew and kurtosis not being "ideal" like Gaussian presence.
+
+Before commencing with any model building, the following needs to applied –
+
+Creation of a new dataframe called `attributes` where:
+
+1.   `loss_flag` is **binarized**: class 2 → 1, class 1 → 0.
+
+2.   All `dbl` type columns are **robust-scaled** (centered by median, scaled by IQR).
+
+```{r}
+
+library(scales) # for robust scaling using rescale function
+
+# Identify numeric columns of type double
+dbl_cols <- FS_encoded |>
+  select(where(is.double)) |>
+  names()
+
+# Create new dataframe with transformations
+attributes <- FS_encoded |>
+  mutate(
+    # Transform loss_flag: 2 -> 1, 1 -> 0
+    loss_flag = ifelse(loss_flag == 2, 1, 0)
+  ) |>
+  # Apply robust scaling to all double columns
+  mutate(across(all_of(dbl_cols), ~ (.-median(., na.rm = TRUE)) / IQR(., na.rm = TRUE)))
+
+glimpse(attributes)
+```
+
+Random Forest development:
+
+```{r}
+
+# ====== 1. Libraries ======
+library(caret)
+library(randomForest)
+library(dplyr)
+library(pROC)
+
+# ====== 2. Data Prep ======
+df_clean <- attributes |>
+  select(loss_flag, local_unrealized_gain_loss, 
+         interest_rate, asset_class, major_industry_name) |>
+  mutate(
+    loss_flag = factor(loss_flag, levels = c(0, 1), labels = c("NoLoss", "Loss")),
+    across(where(is.character), as.factor)
+  )
+
+set.seed(123)
+train_index <- createDataPartition(df_clean$loss_flag, p = 0.8, list = FALSE)
+train_df <- df_clean[train_index, ]
+test_df  <- df_clean[-train_index, ]
+
+# ====== 3. Train Control (Sequential & Simple) ======
+ctrl <- trainControl(
+  method = "cv", 
+  number = 5, 
+  summaryFunction = twoClassSummary, 
+  classProbs = TRUE
+)
+
+# ====== 4. Random Forest ======
+num_features <- ncol(train_df) - 1
+rf_grid <- expand.grid(mtry = seq(1, min(4, num_features)))
+
+set.seed(123)
+rf_model <- train(
+  loss_flag ~ ., 
+  data = train_df,
+  method = "rf",
+  metric = "ROC",
+  trControl = ctrl,
+  tuneGrid = rf_grid,
+  importance = TRUE  # Added to see what's driving the 0.98 AUC
+)
+
+# ====== 5. Evaluation ======
+rf_probs <- predict(rf_model, test_df, type = "prob")[,"Loss"]
+rf_roc   <- roc(test_df$loss_flag, rf_probs, quiet = TRUE)
+
+cat("Final Random Forest AUC:", auc(rf_roc), "\n")
+
+# ====== 6. Variable Importance ======
+# This shows you which attributes matter most for predicting a Loss
+print(varImp(rf_model))
+plot(varImp(rf_model))
+```
+
+The **0.98 AUC** isn't spellworking—it's coming almost entirely from `local_unrealized_gain_loss`.
+
+Apparently, there is "*data leakage*" **despite observed correlation from earlier suggesting otherwise**. Apparently, the model is basically "cheating" because `local_unrealized_gain_loss` is (somehow) essentially a mirror of the `loss_flag`. In the world of finance, when analysing **securities**, `local_unrealized_gain_loss` isn't just a predictor—it is the **real-time accounting value** of the position. In most (many) financial datasets:
+
+-   If `local_unrealized_gain_loss` < 0, then `loss_flag` = 1.
+
+-   If `local_unrealized_gain_loss` ≥ 0, then `loss_flag` = 0.
+
+```{r}
+
+library(ggplot2)
+
+# 1. Create a conditional summary
+# This shows the Min, Max, and Mean of the loss value for each flag
+check_summary <- df_clean |>
+  group_by(loss_flag) |>
+  summarise(
+    min_val = min(local_unrealized_gain_loss, na.rm = TRUE),
+    max_val = max(local_unrealized_gain_loss, na.rm = TRUE),
+    mean_val = mean(local_unrealized_gain_loss, na.rm = TRUE),
+    count = n()
+  )
+
+print("--- Value Range per Flag ---")
+print(check_summary)
+
+# 2. Visualization: The Overlap Test
+# If the two "mountains" (densities) do not overlap at all, 
+# the variable is a direct proxy for the flag.
+ggplot(df_clean, aes(x = local_unrealized_gain_loss, fill = loss_flag)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Distribution of Gain/Loss vs. Loss Flag",
+       subtitle = "If there is no overlap at 0, the flag is derived.") +
+  theme_minimal()
+
+# 3. Correlation Check (Point-Biserial)
+# A correlation of 0.9 or higher confirms it is a proxy.
+correlation_value <- cor(as.numeric(df_clean$loss_flag), 
+                         df_clean$local_unrealized_gain_loss, 
+                         use = "complete.obs")
+
+cat("\nCorrelation between numeric value and flag:", correlation_value, "\n")
+```
+
+**Interpretation of the results:**
+
+-   **The Summary Table:** If the `max_val` for "Loss" is less than or equal to $0$, and the `min_val` for "NoLoss" is greater than $0$ , you have found the exact accounting rule.
+
+-   **The Density Plot:** If the "Loss" density is entirely to the left of the red line ($0$) and the "NoLoss" density is entirely to the right, your model was simply "learning" that $0$ is the cutoff point.
+
+-   **Correlation:** A value near $-1.0$ (since losses are negative numbers and the flag is a positive category) confirms the "leakage."
+
+A correlation of **-0.04** is essentially zero. This completely contradicts the "accounting rule" theory. If the `loss_flag` were a direct derivative of `local_unrealized_gain_loss` (e.g., negative value = loss), the correlation would be near **-1.0**.
+
+**The "Loss" isn't a price drop:** In your specific dataset, a security can have a massive "unrealized loss" (negative number) but *not* have the `loss_flag` triggered, and vice versa.
+
+Earlier, `local_unrealized_gain_loss` had a **100.00** Importance in the Random Forest. If the linear correlation is near zero, but the Random Forest importance is maxed out, it means the relationship is **highly non-linear**.
+
+**Threshold Theory?**
+
+It’s possible that the `loss_flag` only triggers at a very specific, non-zero threshold (e.g., "only if the loss is greater than 20% of the position"). Random Forest is nice at finding those "step functions," while a correlation coefficient ($r$ ) will totally miss them.
+
+**Finding the Hidden Rule**
+
+Since the correlation is low, to now observe the actual distribution. To now exhibit exactly where the "Losses" are hiding:
+
+```{r}
+
+# Look at the raw numbers - where does the flag actually flip?
+quantile_check <- df_clean |>
+  group_by(loss_flag) |>
+  summarise(
+    min = min(local_unrealized_gain_loss),
+    q25 = quantile(local_unrealized_gain_loss, 0.25),
+    median = median(local_unrealized_gain_loss),
+    q75 = quantile(local_unrealized_gain_loss, 0.75),
+    max = max(local_unrealized_gain_loss)
+  )
+
+print(quantile_check)
+
+# Visualizing the "Hidden" Threshold
+ggplot(df_clean, aes(x = loss_flag, y = local_unrealized_gain_loss)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(title = "Is there a hidden threshold?")
+```
+
+There's no simple linear relationship; there's a **highly skewed distribution with extreme outliers.**
+
+**Outlier Sabotage**
+
+Notice the correlation of **-0.04**. In a linear calculation (Pearson), those massive outliers on the right side of the "NoLoss" row (the points at $2 \times 10^5$) and the "Loss" row (the point at $5 \times 10^4$) pull the math toward zero.
+
+-   **The Problem:** Correlation is extremely sensitive to outliers. A few massive gains that aren't flagged as losses are "distracting" the linear calculation.
+
+-   **The RF Strength:** Random Forest doesn't care about the distance (the value); it only cares about the **rank**. It sees that almost all "Loss" flags occur when the value is below zero, regardless of whether it's $-1$ or $-100,000$.
+
+**A Median Message?**
+
+Observation of the medians:
+
+-   **NoLoss Median:** $0.598$ (Positive)
+
+-   **Loss Median:** $-0.325$ (Negative)
+
+The interquartile ranges (q25 to q75) show that 50% of your "Loss" securities sit in a very tight window between $-1.76$ and $-0.02$. This is a classic **Non-Linear Threshold**.
+
+**Why the Leakage is Not Fantasy**
+
+Even though the correlation is low, the **Summary Table** confirms that the "Loss" flag is indeed an accounting proxy:
+
+-   **75% of Losses (q75)** are below $-0.0235$.
+
+-   **75% of NoLosses (q25)** are above $0.0579$.
+
+There is a very tiny "gray area" where some NoLosses have small negative values (min is $-34$) and some Losses have positive values (max is $57,258$), but for $99\%$ of the securities, the rule is: **Negative = Loss Flag.**
+
+The Random Forest is essentially acting as a "Noise Filter." It has learned to ignore those massive outliers and focus on the fact that $0$ is the "cliff" where a security becomes a loss.
+
+```{r}
+
+# Remove the 'answer' to see if the other features have value
+rf_model_predictive <- train(
+  loss_flag ~ interest_rate + asset_class + major_industry_name, 
+  data = train_df,
+  method = "rf",
+  metric = "ROC",
+  trControl = ctrl
+)
+
+print(varImp(rf_model_predictive))
+```
+
+The removal of the local_unrealized_gain_loss attribute pretty much causes a disregard for equities.
+
+```{r}
+
+# Remove the 'answer' to see if the other features have value
+rf_model_predictive <- train(
+  loss_flag ~ asset_class + major_industry_name, 
+  data = train_df,
+  method = "rf",
+  metric = "ROC",
+  trControl = ctrl
+)
+
+print(varImp(rf_model_predictive))
+```
+
+....And so forth.
+
+Further Evaluation (ROC-AUC plots and Confusion Matrix):
+
+```{r}
+
+# =========================
+# 7. ROC–AUC Plots + Confusion Matrix
+# =========================
+
+library(pROC)
+library(caret)
+
+# ---- AUC value ----
+auc_val <- auc(rf_roc)
+cat("Final Random Forest AUC:", auc_val, "\n")
+
+# ---- ROC Plot ----
+plot(
+  rf_roc,
+  legacy.axes = TRUE,
+  lwd = 3,
+  main = paste("Random Forest ROC Curve\nAUC =", round(auc_val, 4))
+)
+
+abline(a = 0, b = 1, lty = 2)  # random classifier reference
+
+# ---- Optional: smooth ROC curve ----
+lines(smooth(rf_roc), lwd = 2, lty = 3)
+
+# =========================
+# Confusion Matrix
+# =========================
+
+# default 0.5 cutoff
+rf_pred_class <- ifelse(rf_probs >= 0.5, "Loss", "NoLoss")
+
+cm <- confusionMatrix(
+  factor(rf_pred_class, levels = c("NoLoss","Loss")),
+  test_df$loss_flag,
+  positive = "Loss"
+)
+
+print(cm)
+
+```
+
+Aside from an **AUC of 0.98** and an **Accuracy of 96.25%**, it has a very high degree of "separable" power—meaning it’s doing a great job distinguishing between your independent trips that resulted in a "Loss" versus "NoLoss."
+
+**Predictive Power**
+
+-   **AUC (0.9803):** This is near-perfect. An Area Under the Curve of 1.0 would mean a flawless model. At 0.98, the model has a 98% chance of correctly ranking a random "Loss" security higher than a random "NoLoss" security.
+
+-   **Accuracy (96.25%):** Out of all securities in your dataset, the model correctly identified 2,615 of them (1,239 + 1,376) and only missed 102.
+
+-   **Kappa (0.9247):** This is a "real-world" check. Since it’s above 0.80, it confirms the high accuracy isn't just due to luck or a skewed dataset; the model is genuinely reliable.
+
+**Sensitivity versus Specificity (The Trade-Off)**
+
+Since the"Positive" class is **Loss**, the metrics focus on how well the catching of those specific events:
+
+-   **Sensitivity (0.9542):** Also known as Recall. Of all the securitie that *actually* resulted in a Loss, the model caught **95.4%** of them. Only 66 "Loss" securities were missed (False Negatives).
+
+-   **Specificity (0.9718):** Of all the securities that were actually "NoLoss," the model correctly identified **97.2%** of them. It only falsely flagged 36 securities as a Loss (False Positives).
+
+**Precision (Pos Pred Value)**
+
+-   **Pos Pred Value (0.9745):** This is your "Trust Factor." If the model flags a security and says, "This will be a Loss," it is correct **97.45%** of the time. This is excellent if you plan to use this model to take preemptive action on specific securities.
+
+**Statistical Significance**
+
+-   **P-Value \[Acc \> NIR\] (\< 2.2e-16):** The "No Information Rate" is 53%. This means if you just guessed "Loss" for every single trip, you'd be right 53% of the time. Because your p-value is so low, we can say with near-certainty that your model is significantly better than just guessing based on the majority class.
+
+-   **McNemar's Test P-Value (0.004):** This is interesting. A low p-value here suggests there is a slight systematic difference between your False Positives (36) and False Negatives (66). The model is slightly more likely to miss a "Loss" (Type II error) than it is to falsely predict one (Type I error).
+
+## Conclusion
+
+This project integrated data assimilation, data wrangling, and analytical modeling into a unified, end-to-end workflow designed to transform raw portfolio holdings into actionable risk and performance insights using the [**R programming language**]{.underline} ecosystem. Multiple data sources were consolidated, cleaned, and standardized to ensure consistency across instruments, followed by structured feature engineering to support asset allocation analysis, industry exposure measurement, and concentration diagnostics for both fixed income securities and equities. Portfolio characteristics were further evaluated through gain–loss performance assessment, return behavior modeling, and loss forecasting to quantify downside risk and stress sensitivity across sectors and asset classes.
+
+Building on this foundation, supervised learning models were implemented within a reproducible cross-validation framework, combining a logistic regression baseline with ensemble methods, including [**randomForest R package**]{.underline} and gradient boosting via [**XGBoost**]{.underline}. Careful preprocessing—such as factor encoding, numeric matrix conversion, and robust train–test partitioning—ensured stable training while ROC-AUC and PR-AUC metrics provided unbiased performance evaluation. Together, these steps produced reliable probability estimates and interpretable classification thresholds for loss prediction.
+
+Overall, the developments resulting pipelines deliver a scalable and transparent beginner learning framework that links portfolio construction, risk diagnostics, and predictive modeling into a single system, enabling more informed asset allocation decisions, improved monitoring of industry concentration risk, and proactive identification of potential losses.
+
+## Reference
+
+Comptroller, O. of the. (2025, March 3). *NYC Office of the Comptroller: Board of Education Retirement System (BERS) holdings data: NYC open data*. NYC Office of The Comptroller: Board of Education Retirement System (BERS) Holdings Data \| NYC Open Data. https://data.cityofnewyork.us/City-Government/NYC-Office-of-The-Comptroller-Board-of-Education-R/fypi-ruxh/about_data
