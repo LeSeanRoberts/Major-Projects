@@ -1,0 +1,1962 @@
+---
+title: "Playing Around with NYS Occupational Employment & Wage Statistics (OEWS)"
+subtitle: |
+  [Email](lesean.roberts85@gmail.com) | 
+  [LinkedIn](https://www.linkedin.com/in/le-sean-roberts) | 
+  [GitHub](https://github.com/LeSeanRoberts)
+author: "Le'Sean Roberts"
+description: "CUNY New York City College of Technology Alumni (Graduate)"
+date: today
+date-format: long
+format: html
+---
+
+## Abstract
+
+This study leverages the New York State Occupational Employment and Wage Statistics (OEWS) dataset to model and predict median annual wages across diverse labour sectors. Initial Exploratory Data Analysis (EDA) and visualisation revealed significant wage disparities. K-Means clustering was evaluated to identify latent structural groupings within the labour market, while extensive feature engineering—including the extraction of SOC Major Groups, Credential Proxies, and a Cost-of-Living (COL) Index—was implemented to provide essential economic context; applied to random forest. The results demonstrate that incorporating hierarchical occupational structures is vital for mitigating prediction anomalies in heterogeneous labour data.
+
+## Introduction
+
+This study utilizes the Occupational Employment and Wage Statistics (OEWS) dataset published by the New York State Department of Labour to examine and predict median annual wages across diverse labour sectors in New York State. Given the multidimensional and heterogeneous nature of occupational labour data—spanning industries, geographies, and skill levels—a structured analytical framework is required to uncover patterns, contextualize disparities, and build reliable predictive models.
+
+Exploratory Data Analysis (EDA) and visualiation constitute the first stage of this framework. Distributional plots, comparative wage summaries, and regional or occupational breakdowns provide an immediate view of wage dispersion, outliers, and structural inequalities across sectors. These techniques help diagnose skewness, heteroscedasticity, and occupational concentration effects, while guiding data cleaning and transformation decisions. By revealing the underlying structure of the dataset, visualization ensures that subsequent modeling steps are both statistically grounded and interpretable.
+
+To further investigate latent structure within the labour market, K-Means clustering is employed as an unsupervised learning approach. Clustering groups occupations or regions with similar employment and wage characteristics, enabling identification of natural segments such as high-skill/high-wage occupations, transitional middle-skill clusters, and lower-wage service sectors. These groupings provide insight into structural segmentation and serve as an empirical basis for understanding heterogeneity before predictive modelling.
+
+Complementing this exploratory phase, Random Forest modelling is applied to predict median annual wages using both raw variables and engineered features. Feature engineering plays a critical role, incorporating hierarchical Standard Occupational Classification (SOC) Major Groups, credential proxies, and a Cost-of-Living (COL) index to embed economic and institutional context into the model. Random Forest’s ensemble structure captures nonlinear relationships and complex interactions while providing variable importance measures that clarify the drivers of wage outcomes. This approach enhances predictive robustness and mitigates anomalies arising from diverse occupational categories.
+
+Together, visualization, clustering, and ensemble learning create an integrated pipeline that transforms OEWS data into both explanatory insights and reliable wage forecasts.
+
+## Data Dictionary
+
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Column Name**        | **API Field Name**           | **Data Type** | **Description**                                                 |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Area Type**          | `area_type`                  | Number        | Type of Area: 1 - Statewide, 10 - Labor Market Region.          |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Area**               | `area`                       | Number        | Geographic Area Code (1-10 for Regions; 36 for Statewide).      |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Area Name**          | `area_name`                  | Text          | Name of the NY Labor Market Region or "New York State".         |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **SOC Code**           | `standard_occupational_code` | Text          | Standardized coding structure (SOC) for occupational titles.    |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Occupational Title** | `occupational_title`         | Text          | Title of the occupation based on the OMB 2010 SOC system.       |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Employment**         | `employment`                 | Number        | Count of part-time and full-time workers paid a wage or salary. |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Mean Wage**          | `mean`                       | Number        | Average hourly wage for the occupation.                         |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Median Wage**        | `median`                     | Number        | 50th percentile hourly wage for the occupation.                 |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Entry Wage**         | `entry_wage`                 | Number        | Average of the bottom third of wages in an occupation.          |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+| **Experienced Wage**   | `experienced_wage`           | Number        | Average of the top two-thirds of wages in an occupation.        |
++------------------------+------------------------------+---------------+-----------------------------------------------------------------+
+
+Based on the data dictionary and the Occupational Employment and Wage Statistics (OEWS) dataset referenced, the **Standard Occupational Code (SOC)** is a hierarchical system.
+
+The SOC code is a **6-digit code** (often displayed with a hyphen, e.g., `11-1011`). The labels for each value depend on the level of the hierarchy you are looking at.
+
+**Hierarchy Labels (The Tiers)**
+
+Each part of the 6-digit code represents a specific level of detail. The labels for these "tiers" are:
+
+-   **Major Group:** The first two digits (e.g., `11-0000`). These are the broadest categories (e.g., Management, Healthcare).
+
+-   **Minor Group:** The third digit (e.g., `11-1000`).
+
+-   **Broad Occupation:** The fourth and fifth digits (e.g., `11-1010`).
+
+-   **Detailed Occupation:** The sixth digit (e.g., `11-1011`). This is the most specific level used in the dataset.
+
+**\
+Major Group Labels (The 23 Categories)**
+
+These are the top-level "labels" for the first two digits of any SOC code:
+
++-----------------+------------------------------------------------------------------+
+| **SOC Prefix**  | **Major Group Label (Title)**                                    |
++-----------------+------------------------------------------------------------------+
+| **11-0000**     | Management Occupations                                           |
++-----------------+------------------------------------------------------------------+
+| **13-0000**     | Business and Financial Operations Occupations                    |
++-----------------+------------------------------------------------------------------+
+| **15-0000**     | Computer and Mathematical Occupations                            |
++-----------------+------------------------------------------------------------------+
+| **17-0000**     | Architecture and Engineering Occupations                         |
++-----------------+------------------------------------------------------------------+
+| **19-0000**     | Life, Physical, and Social Science Occupations                   |
++-----------------+------------------------------------------------------------------+
+| **21-0000**     | Community and Social Service Occupations                         |
++-----------------+------------------------------------------------------------------+
+| **23-0000**     | Legal Occupations                                                |
++-----------------+------------------------------------------------------------------+
+| **25-0000**     | Educational Instruction and Library Occupations                  |
++-----------------+------------------------------------------------------------------+
+| **27-0000**     | Arts, Design, Entertainment, Sports, and Media Occupations       |
++-----------------+------------------------------------------------------------------+
+| **29-0000**     | Healthcare Practitioners and Technical Occupations               |
++-----------------+------------------------------------------------------------------+
+| **31-0000**     | Healthcare Support Occupations                                   |
++-----------------+------------------------------------------------------------------+
+| **33-0000**     | Protective Service Occupations                                   |
++-----------------+------------------------------------------------------------------+
+| **35-0000**     | Food Preparation and Serving Related Occupations                 |
++-----------------+------------------------------------------------------------------+
+| **37-0000**     | Building and Grounds Cleaning and Maintenance Occupations        |
++-----------------+------------------------------------------------------------------+
+| **39-0000**     | Personal Care and Service Occupations                            |
++-----------------+------------------------------------------------------------------+
+| **41-0000**     | Sales and Related Occupations                                    |
++-----------------+------------------------------------------------------------------+
+| **43-0000**     | Office and Administrative Support Occupations                    |
++-----------------+------------------------------------------------------------------+
+| **45-0000**     | Farming, Fishing, and Forestry Occupations                       |
++-----------------+------------------------------------------------------------------+
+| **47-0000**     | Construction and Extraction Occupations                          |
++-----------------+------------------------------------------------------------------+
+| **49-0000**     | Installation, Maintenance, and Repair Occupations                |
++-----------------+------------------------------------------------------------------+
+| **51-0000**     | Production Occupations                                           |
++-----------------+------------------------------------------------------------------+
+| **53-0000**     | Transportation and Material Moving Occupations                   |
++-----------------+------------------------------------------------------------------+
+| *Note:*         | *Group 55-0000 (Military) is typically excluded from OEWS data.* |
++-----------------+------------------------------------------------------------------+
+
+**Occupational Title**
+
+Unlike the `area_type`, which has only two distinct values, the `occupational_title` labels are dynamic and correspond directly to the **Standard Occupational Code (SOC)**.
+
+-   **Total Labels:** There are approximately **821-830** unique labels in this field.
+
+-   **Definition:** This field contains the text name for the job category. It follows the federal 2018 SOC system (though some older data may use the 2010 system).
+
+-   **Format:** These are the common names for jobs.
+
+**Examples of Labels in this field:**
+
+-   *Chief Executives* (for SOC 11-1011)
+
+-   *General and Operations Managers* (for SOC 11-1021)
+
+-   *Registered Nurses* (for SOC 29-1141)
+
+-   *Software Developers* (for SOC 15-1252)
+
+**\
+Area Type**
+
+The `area_type` field is a numeric code for categories used to distinguish between the scale of the geographic region being reported.
+
++--------------+------------------------------------------------------------------------------------+
+| **Value**    | **Label (Definition)**                                                             |
++--------------+------------------------------------------------------------------------------------+
+| **1**        | **Statewide** (Represents data for the entire state of New York)                   |
++--------------+------------------------------------------------------------------------------------+
+| **10**       | **Labor Market Region** (Represents one of the 10 specific economic regions in NY) |
++--------------+------------------------------------------------------------------------------------+
+
+## Data Assimilation and Data Wrangling
+
+To now acquire the data from NYC Open Data via a Socrata API.\
+To now begin the process of transforming raw data into a more usable format. This involves cleaning, structuring, and enriching data so that it’s ready for analysis. \
+Data acquired through JSON structure comes in object form despite observing numerical, integer or character properties. Of consequence, attributes will be transformed into appropriate data types in order to further proceed with the data wrangling process.
+
+```{r, message=FALSE, warning=FALSE}
+
+library(jsonlite)
+library(tidyverse)
+
+# 1. Define API parameters
+api_url <- "https://data.ny.gov/resource/gkgz-nw24.json"
+app_token <- "K6oKQ6xYZ9P3loJhIBkb4QKZm"
+
+# 2. Fetch the data 
+# (Adding the token to the header prevents rate-limiting)
+df <- fromJSON(
+  paste0(api_url, "?$$app_token=", app_token, "&$limit=8000")
+)
+
+# 3. Data Cleaning & Transformation
+OEWS_data <- df |>
+  # Convert character wages/counts to numeric
+  mutate(across(c(employment, mean, median, entry_wage, experienced_wage), as.numeric)) |>
+  # Transform encoded/categorical values to factors
+  mutate(across(c(area_type, area, area_name,
+                  standard_occupational_code, occupational_title), as.factor)) |>
+  as_tibble() # changing to a tibble for strong data wrangling compatibility
+
+
+# View results
+str(OEWS_data)
+```
+
+```{r}
+
+dim(OEWS_data)
+   # Identifying the count of rows (instances) and columns (attributes)
+```
+
+Checking for any missing values:
+
+```{r}
+
+# Counting missing values per column
+colSums(is.na(OEWS_data))
+```
+
+Sinces wages levels are generally well structured and capped, will impute missing values with the **median** value for the median column and experienced_wage column, respectively.
+
+```{r}
+
+OEWS_data <- OEWS_data |>
+  mutate(
+    # Impute Median Wage
+    median = replace_na(median, median(median, na.rm = TRUE)),
+    
+    # Impute Experienced Wage
+    experienced_wage = replace_na(experienced_wage, median(experienced_wage, na.rm = TRUE))
+  )
+
+# Verify the fix
+colSums(is.na(OEWS_data[c("median", "experienced_wage")]))
+
+```
+
+Will drop all missing values now, namely, due to the 'employment' column having too much missing values. Also, population (labour or in general) counts can vary drastically across geospatial or geopolitical scales. There's no intent on manipulating the skew and kurtosis way too much with imputation for 1083 missing instances.
+
+```{r}
+
+OEWS_data_clean <- OEWS_data |>
+  na.omit()
+str(OEWS_data_clean)
+
+```
+
+```{r}
+
+# Observing unique instances for 'occupational_title'
+unique_occupations <- unique(OEWS_data_clean$occupational_title)
+
+# To see how many unique values there are
+length(unique_occupations)
+```
+
+-   **Factor Levels (`818`):** This is the total number of unique occupational titles defined in the **dataset's metadata or from previous operations** (e.g., if you filtered the data but didn't drop unused levels).
+
+-   **Unique Instances (`729`):** This is the number of unique occupations actually **present** in your current, filtered, and cleaned `OEWS_data_clean` dataframe.
+
+To align the factor levels with the actual data currently in your dataframe, applying the `droplevels()` function. This removes the 89 levels (`818 - 729 = 89`) that are not present in the data.
+
+```{r}
+
+# Drop unused factor levels
+OEWS_data_clean$occupational_title <- droplevels(OEWS_data_clean$occupational_title)
+# Now checking the levels again
+length(levels(OEWS_data_clean$occupational_title))
+
+dim(OEWS_data_clean)
+```
+
+To reduce the excessive granularity of the `occupational_title` column, willuse the **Standard Occupational Code (SOC)** column. The detailed occupations provided in the dataset are based on the **2010 Standard Occupational Classification (SOC) system**. The SOC structure is hierarchical, meaning one can aggregate the detailed titles into broader categories by taking the first two, four, or six digits of the code. To reduce the 729 unique instances down as far as possible, while keeping all other attributes relevant...will aggregate the data based on the **Major Group** level of the SOC system.
+
+```{r}
+# Data that's meaningful for EDA, supervised and unsupervised learning interests 
+OEWS_for_modelling <- OEWS_data_clean |>
+  # 1. Create the high-level group column
+  mutate(major_group_code = substr(standard_occupational_code, 1, 2)) |>
+  
+  # 2. Keeping the necessary columns for future research
+  select(
+    area_type, 
+    area, 
+    area_name, 
+    occupational_title,
+    major_group_code, # New reduced granularity column
+    employment, 
+    mean, 
+    median, 
+    entry_wage, 
+    experienced_wage
+  ) |>
+  
+  # 3. Optional: Convert the new code to a factor for modeling
+  mutate(major_group_code = as.factor(major_group_code))
+
+# Verify the structure
+str(OEWS_for_modelling)
+```
+
+Outcome:
+
+-   **Keeps Row Integrity:** preservation of the 5, 976 rows and columns of interest. This is necessary for machine learning.
+
+-   **Reduces Granularity:** reduced the `occupational_title` attribute from **729** unique instances down to **23** `major_group_code` instances, drastically simplifying the factor levels.
+
+-   **Maintains Context:** maintaing all geographic identifiers (`area_name`) and wage columns (`entry_wage`, `experienced_wage`) to allow for regional analysis.
+
+## Entry Wage Analysis Across Regions
+
+Computing the average entry wage (and experienced wage) for each major job category within each region:
+
+```{r}
+
+regional_wage_summary <- OEWS_for_modelling |>
+  # Group by Region and the reduced Occupational Group
+  group_by(area_name, major_group_code) |>
+  
+  # Calculate averages
+  summarize(
+    avg_entry_wage = mean(entry_wage, na.rm = TRUE),
+    avg_experienced_wage = mean(experienced_wage, na.rm = TRUE),
+    total_employment = sum(employment, na.rm = TRUE),
+    .groups = "drop" # Ungroup after summarizing
+  )
+
+# Observing the results
+regional_wage_summary
+```
+
+A heatmap showing the average entry wage by region and major occupational group:
+
+```{r}
+
+# Create the heatmap
+ggplot(regional_wage_summary, aes(x = major_group_code,
+                                  y = area_name,
+                                  fill = avg_entry_wage)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b",
+                      labels = scales::dollar) +
+  theme_minimal() +
+  labs(
+    title = "Regional Entry Wage Differences by Major Occupational Group",
+    x = "Major Occupational Group Code (2-digit)",
+    y = "Labor Market Region",
+    fill = "Avg. Entry Wage"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The above visualization summarizes the data by region and major group, reducing the complexity from hundreds of occupations to **23** groups while retaining all geographic context for research.
+
+```{r}
+
+# Applying 'OEWS_for_modeling' from the previous step
+regional_inequality_summary <- OEWS_for_modelling |>
+  # Group by Region and the reduced Occupational Group
+  group_by(area_name, major_group_code) |>
+  
+  # Calculate standard deviation and average for comparison
+  summarize(
+    std_dev_entry_wage = sd(entry_wage, na.rm = TRUE),
+    avg_entry_wage = mean(entry_wage, na.rm = TRUE),
+    # Count rows to ensure standard deviation is meaningful
+    count = n(), 
+    .groups = "drop"
+  ) |>
+  
+  # Filter out groups with only one data point, as SD is NA
+  filter(count > 1)
+
+# View the results to identify high inequality
+print(regional_inequality_summary |>
+        arrange(desc(std_dev_entry_wage)))
+```
+
+Heatmap for Wages and Inequality. Comparing average wages and standard deviation:
+
+```{r}
+
+library(tidyr)
+
+# Reshape data for plotting both metrics
+plot_data_long <- regional_inequality_summary %>%
+  pivot_longer(cols = c(avg_entry_wage, std_dev_entry_wage), 
+               names_to = "metric", values_to = "value")
+
+# Create Heatmap
+ggplot(plot_data_long, aes(x = major_group_code, y = area_name, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", labels = scales::dollar) +
+  facet_wrap(~metric, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    title = "Regional Wage Analysis",
+    subtitle = "Average Entry Wage vs. Standard Deviation (Inequality)",
+    x = "Major Occupational Group Code",
+    y = "Labor Market Region",
+    fill = "Value"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Bar Plot (Total Employment by Region). This visualizes the total employment volume for each region based on the aggregated data.
+
+```{r}
+
+# Summarize data for employment plot
+employment_data <- regional_inequality_summary |>
+  group_by(area_name) |>
+  summarize(total_emp = sum(count)) # Count represents employment for simplicity here
+
+# Create Bar Plot
+ggplot(employment_data, aes(x = reorder(area_name, -total_emp), y = total_emp)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Total Employment by Region",
+    x = "Labor Market Region",
+    y = "Total Sample Count"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Box Plot (Distribution of Wages by Region). This plot shows the spread of average entry wages across regions, highlighting medians and outliers.
+
+```{r}
+
+library(ggplot2)
+
+# Create Box Plot
+ggplot(regional_inequality_summary, aes(x = area_name, y = avg_entry_wage)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Average Entry Wages by Region",
+    x = "Labor Market Region",
+    y = "Average Entry Wage"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Correlation analysis to see if higher wages correlate with higher wage inequality:
+
+```{r}
+
+# Correlation between Average Wage and Standard Deviation
+correlation_test <- cor.test(
+  regional_inequality_summary$avg_entry_wage, 
+  regional_inequality_summary$std_dev_entry_wage, 
+  use = "complete.obs"
+)
+
+# View correlation result
+print(correlation_test)
+
+# Visualize with a scatter plot
+ggplot(regional_inequality_summary, aes(x = avg_entry_wage, y = std_dev_entry_wage)) +
+  geom_point(aes(color = area_name), size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Correlation: Wage Level vs. Inequality",
+    x = "Average Entry Wage",
+    y = "Standard Deviation of Entry Wage (Inequality)",
+    color = "Region"
+  ) +
+  scale_x_continuous(labels = scales::dollar) +
+  scale_y_continuous(labels = scales::dollar)
+```
+
+A linear regression model that predicts the `experienced_wage` based on other attributes:
+
+```{r}
+
+# 1. Prepare the data: Ensure factors are set and filter NA values
+model_data <- OEWS_for_modelling |>
+  filter(!is.na(experienced_wage), !is.na(entry_wage))
+
+# 2. Build the linear regression model
+# Formula: experienced_wage ~ entry_wage + area_name
+wage_model_2 <- lm(experienced_wage ~ entry_wage + area_name + employment + median + mean, 
+                 data = model_data)
+
+# 3. View the model summary
+summary(wage_model_2)
+```
+
+## Experienced Wage Analysis Across Regions
+
+A heatmap showing the average experienced wage by region and major occupational group:
+
+```{r}
+
+# Create the heatmap
+ggplot(regional_wage_summary, aes(x = major_group_code,
+                                  y = area_name,
+                                  fill = avg_experienced_wage)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b",
+                      labels = scales::dollar) +
+  theme_minimal() +
+  labs(
+    title = "Regional Experienced Wage Differences by Major Occupational Group",
+    x = "Major Occupational Group Code (2-digit)",
+    y = "Labor Market Region",
+    fill = "Avg. Experienced Wage"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+
+# Applying 'OEWS_for_modeling' from the previous step
+regional_inequality_summary <- OEWS_for_modelling |>
+  # Group by Region and the reduced Occupational Group
+  group_by(area_name, major_group_code) |>
+  
+  # Calculate standard deviation and average for comparison
+  summarize(
+    std_dev_experienced_wage = sd(experienced_wage, na.rm = TRUE),
+    avg_experienced_wage = mean(experienced_wage, na.rm = TRUE),
+    # Count rows to ensure standard deviation is meaningful
+    count = n(), 
+    .groups = "drop"
+  ) |>
+  
+  # Filter out groups with only one data point, as SD is NA
+  filter(count > 1)
+
+# View the results to identify high inequality
+print(regional_inequality_summary |>
+        arrange(desc(std_dev_experienced_wage)))
+```
+
+Heatmap for Wages and Inequality. Comparing average wages and standard deviation:
+
+```{r}
+
+
+library(tidyr)
+
+# Reshape data for plotting both metrics
+plot_data_long <- regional_inequality_summary |>
+  pivot_longer(cols = c(avg_experienced_wage, std_dev_experienced_wage), 
+               names_to = "metric", values_to = "value")
+
+# Create Heatmap
+ggplot(plot_data_long, aes(x = major_group_code, y = area_name, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f7fbff", high = "#08306b", labels = scales::dollar) +
+  facet_wrap(~metric, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    title = "Regional Wage Analysis",
+    subtitle = "Average Experienced Wage vs. Standard Deviation (Inequality)",
+    x = "Major Occupational Group Code",
+    y = "Labor Market Region",
+    fill = "Value"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Bar Plot (Total Employment by Region). This visualizes the total employment volume for each region based on the aggregated data.
+
+```{r}
+
+# Summarize data for employment plot
+employment_data <- regional_inequality_summary |>
+  group_by(area_name) |>
+  summarize(total_emp = sum(count)) # Count represents employment for simplicity here
+
+# Create Bar Plot
+ggplot(employment_data, aes(x = reorder(area_name, -total_emp), y = total_emp)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Total Employment by Region",
+    x = "Labor Market Region",
+    y = "Total Sample Count"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Box Plot (Distribution of Wages by Region). This plot shows the spread of average entry wages across regions, highlighting medians and outliers.
+
+```{r}
+
+library(ggplot2)
+
+# Create Box Plot
+ggplot(regional_inequality_summary, aes(x = area_name, y = avg_experienced_wage)) +
+  geom_boxplot(fill = "lightblue", color = "darkblue") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Average Experienced Wages by Region",
+    x = "Labor Market Region",
+    y = "Average Experienced Wage"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Correlation analysis to see if higher wages correlate with higher wage inequality::\
+
+```{r}
+
+# Correlation between Average Wage and Standard Deviation
+correlation_test <- cor.test(
+  regional_inequality_summary$avg_experienced_wage, 
+  regional_inequality_summary$std_dev_experienced_wage, 
+  use = "complete.obs"
+)
+
+# View correlation result
+print(correlation_test)
+
+# Visualize with a scatter plot
+ggplot(regional_inequality_summary, aes(x = avg_experienced_wage, y = std_dev_experienced_wage)) +
+  geom_point(aes(color = area_name), size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Correlation: Wage Level vs. Inequality",
+    x = "Average Experienced Wage",
+    y = "Standard Deviation of Experienced Wage (Inequality)",
+    color = "Region"
+  ) +
+  scale_x_continuous(labels = scales::dollar) +
+  scale_y_continuous(labels = scales::dollar)
+
+```
+
+## General Attributes Analysis
+
+**Generating Q-Q Plots**
+
+A **Quantile-Quantile (Q-Q) plot** is a graphical tool used to decide if a dataset follows a specific theoretical distribution. Instead of just observe a histogram or kernel density and judging if it looks good enough to be represented by the theoretical distribution in question, a Q-Q plot gives a precise line to follow. The plot compares two sets of quantiles against each other:
+
+1.  **The Theoretical Quantiles:** Where your data *should* fall if it followed a specific distribution (like the Normal Distribution).
+
+2.  **The Sample Quantiles:** Where your data actually falls.
+
+Each data point from the sample is paired with a corresponding quantile from the theoretical distribution and plotted on a scatter plot. One to then observe how well the points hug a **45-degree reference line**.
+
++-----------------------------+-------------------------------------------------------------------------------+
+| Observation                 | Interpretation                                                                |
++-----------------------------+-------------------------------------------------------------------------------+
+| **Points follow the line**  | The data follows the assumed distribution (e.g., it is normal).               |
++-----------------------------+-------------------------------------------------------------------------------+
+| **Curved "S" shape**        | The data has "fats tails" (kurtosis) or is more skewed than the distribution. |
++-----------------------------+-------------------------------------------------------------------------------+
+| **Points curve up or down** | The data is skewed to the left or right.                                      |
++-----------------------------+-------------------------------------------------------------------------------+
+| **Significant outliers**    | Points at the very ends of the plot will stray far from the line.             |
++-----------------------------+-------------------------------------------------------------------------------+
+
+: Q-Q plots for numeric (continuous) attributes:
+
+```{r}
+
+# 1. Reshape data to long format for easier plotting
+plot_data_long <- OEWS_for_modelling |>
+  select(employment, entry_wage, experienced_wage, mean, median) |>
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+# 2. Create Q-Q plots using ggplot2
+ggplot(plot_data_long, aes(sample = value)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~variable, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Q-Q Plots for Normality Check",
+    subtitle = "Checking if data follows a normal distribution",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  )
+```
+
+Will proceed with observing the shape of each density/distribution, correlations and scatter plot relationships. For correlation, choice of measure will be Spearman, which measures any monotonic relationship between two continuous random variables and is adopted when the data do not follow a normal distribution (Rovetta, 2020).
+
+**Spearman Correlation:**
+
+A measure of **monotonic relationship** based on **ranks**.
+
+Instead of using the raw data values ($X_i, Y_i$), we convert them into ranks ($R_i, S_i$).
+
+-   $X_i$: Raw value for observation $i$ in variable 1.
+
+-   $Y_i$: Raw value for observation $i$ in variable 2.
+
+-   $R_i$: Rank of $X_i$ (e.g., 1 for smallest, $n$ for largest).
+
+-   $S_i$: Rank of $Y_i$.
+
+Spearman's correlation is calculated by applying the Pearson correlation formula to the ranks:
+
+$$
+\rho = \frac{\text{cov}(R,S)}{\sigma_R \sigma_S}
+$$
+
+Where:
+
+-   $\text{cov}(R, S)$ is the covariance of the ranks.
+
+-   $\sigma_R$ and $\sigma_S$ are the standard deviations of the ranks.
+
+**The Simplified Formula (for no ties):**
+
+If there are no tied ranks (every data point has a unique value), the formula simplifies to a much faster version based on the difference between ranks ($d_i = R_i - S_i$):
+
+$$
+\rho = 1 - \frac{6\sum{d_{i}^2}}{n(n^2-1)}
+$$
+
+Where:
+
+-   $d_i$: The difference between the rank of $X_i$ and the rank of $Y_i$.
+
+-   $n$: The number of observations.
+
+**Key Mathematical Characteristics:**
+
++--------------------+------------------------------------------------------------------------------------------------------------------+
+| **Characteristic** | **Description**                                                                                                  |
++--------------------+------------------------------------------------------------------------------------------------------------------+
+| **Range**          | $-1 \leq \rho \leq 1$                                                                                            |
++--------------------+------------------------------------------------------------------------------------------------------------------+
+| **Interpretation** | **+1**: Perfect monotonic increasing relationship.                                                               |
+|                    |                                                                                                                  |
+|                    | \                                                                                                                |
+|                    |                                                                                                                  |
+|                    | **-1**: Perfect monotonic decreasing relationship.                                                               |
+|                    |                                                                                                                  |
+|                    | \                                                                                                                |
+|                    |                                                                                                                  |
+|                    | **0**: No monotonic relationship.                                                                                |
++--------------------+------------------------------------------------------------------------------------------------------------------+
+| **Robustness**     | Because it uses ranks, it is highly robust to **outliers** in the raw data.                                      |
++--------------------+------------------------------------------------------------------------------------------------------------------+
+| **Data Type**      | Ideally suited for **ordinal** data, but also used on continuous data to check for non-linear, monotonic trends. |
++--------------------+------------------------------------------------------------------------------------------------------------------+
+
+Pairplot (scatter, distribution, correlation) for the continuous attributes:
+
+```{r, message=FALSE, warning=FALSE}
+
+library(GGally)
+
+# Select numeric vars + grouping var
+plot_data <- OEWS_for_modelling[, c(
+  "experienced_wage",
+  "entry_wage",
+  "employment",
+  "median",
+  "mean",
+  "area_type"
+)]
+
+ggpairs(
+  plot_data,
+  columns = 1:5,  # numeric columns only
+  aes(color = area_type, alpha = 0.5),
+  lower = list(continuous = wrap("points", size = 0.5, alpha = 0.3)),
+  upper = list(continuous = wrap("cor", method = "spearman", size = 3))
+) +
+  theme_bw() +
+  theme(
+    strip.text.x = element_text(size = 8),
+    strip.text.y = element_text(size = 8),
+    axis.text.x  = element_text(size = 6, angle = 45, hjust = 1),
+    axis.text.y  = element_text(size = 6),
+    legend.position = "bottom"
+  ) +
+  labs(title = "Pairplot of Wage Variables and Employment by Area Type")
+```
+
+Heatmap of the Average Median Wage by Area and Major Group:
+
+```{r}
+
+# Create a heatmap of Average Median Wage by Area and Major Group
+heatmap_data <- OEWS_for_modelling|>
+  group_by(area_name, major_group_code) |>
+  summarize(avg_median = mean(median, na.rm = TRUE))
+
+ggplot(heatmap_data, aes(x = major_group_code, y = area_name, fill = avg_median)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "darkgreen", labels = scales::dollar) +
+  theme_minimal() +
+  labs(title = "Average Median Wage by Area and Major Group",
+       x = "Major Group Code", y = "Area Name")
+```
+
+**Factor vs. Numerical:**
+
+First case: categorical variable 'area_type' against all continuous variables. Observing the amount of levels (groups or classes) for 'area_type'.
+
+```{r}
+
+unique_cases <- unique(OEWS_for_modelling$area_type)
+
+unique_cases
+
+length(unique_cases)
+```
+
+Observed:
+
+-   One **categorical variable with two levels** (say `type ∈ {A, B}`)
+
+-   Non-normal **continuous variable** (`employment`, etc., etc.)
+
+This is exactly the classical setting for the **Mann–Whitney U test** (Hinton, 2010), also called the **Wilcoxon rank-sum test**).
+
+Data structure for such test:
+
+Let
+
+$$
+T_i \in \{0,1\},    i=1,...,N
+$$
+
+be the binary group indicator.
+
+Have
+
+$$
+E_i \in \mathbb{R}
+$$
+
+as the continuous outcome.
+
+Split into groups:
+
+$$
+X=\{E_i : T_i = 0\}, n_1 = |X|
+$$
+
+$$
+Y=\{E_i : T_i = 1\}, n_2 = |Y|
+$$
+
+$$
+N=n_1 + n_2
+$$
+
+Hypotheses:
+
+Distributional –
+
+$$
+H_0: F_X(e)=F_Y(e) \longrightarrow \text{median}(X)=\text{median}(Y)
+$$
+
+$$
+H_1: \text{medians differ}
+$$
+
+Ranking:
+
+Pool observations –
+
+$$
+\{E_1,...,E_n\}
+$$
+
+Assign ranks –
+
+$$
+R_i=\text{rank}(E_i)
+$$
+
+Rank sums:
+
+Group 0 –
+
+$$
+R_X= \sum_{i:T_i=0} R_i
+$$
+
+Group 1 –
+
+$$
+R_Y= \sum_{i:T_i=1} R_i
+$$
+
+Mann-Whitney statistic:
+
+$$
+U_X = R_X - \frac{n_1(n_1 +1)}{2}
+$$
+
+Equivalent pairwise form –
+
+$$
+U_x=\sum_{i:T_i=0}  \sum_{i:T_i=1} \textbf{1} (E_i > E_j) + \frac{1}{2}\textbf{1}(E_i = E_j)
+$$
+
+Interpretation:
+
+$$
+U_X = \text{# times group 0 employment > group 1 employment}
+$$
+
+Distribution under $H_0$:
+
+$$
+\mathbb{E}[U_X]=\frac{n_1 n_2}{2}
+$$
+
+$$
+\text{Var}(U_X)=\frac{n_1n_2(N+1)}{12}... \text{no ties}
+$$
+
+Test statistic:
+
+$$
+Z=\frac{U_X -\frac{n_1n_2}{2}}{\sqrt{\frac{n_1n_2(N+1)}{12}}}\sim \mathcal{N}(0,1)
+$$
+
+Effective size:
+
+Probability that one type has higher employment –
+
+$$
+P(X>Y)=\frac{U_X}{n_1n_2}
+$$
+
+**SEPARATE NOTE:** the interquartile range (IQR) measures statistical dispersion by computing the spread of the middle 50% of a data set $(IQR = Q_3 - Q_1)$. It identifies the range between the 75th percentile $(Q_3)$ and the 25th percentile $(Q_1)$, making it a robust measure that ignores outliers. A smaller IQR indicates more consistent data, while a larger IQR suggests higher variability.
+
+```{r}
+
+library(purrr)
+library(dplyr)
+library(effsize)
+library(tibble)
+
+num_vars <- c(
+  "employment",
+  "mean",
+  "median",
+  "entry_wage",
+  "experienced_wage"
+)
+
+compare_binary_nonparam <- function(data, group, var_names){
+
+  # checks
+  if(!group %in% names(data))
+    stop("Grouping variable not found in data")
+
+  if(!all(var_names %in% names(data)))
+    stop("Some variables not found in data")
+
+  g <- as.factor(data[[group]])
+
+  if(n_distinct(g) != 2)
+    stop(paste(group, "must have exactly 2 unique values"))
+
+  groups <- sort(unique(g))
+
+  purrr::map_dfr(var_names, function(v){
+
+    y <- data[[v]]
+
+    # keep only complete cases
+    idx <- !is.na(y) & !is.na(g)
+    y <- y[idx]
+    g_sub <- g[idx]
+
+    # skip non-numeric safely
+    if(!is.numeric(y)) return(NULL)
+
+    wt <- wilcox.test(y ~ g_sub)
+    cd <- effsize::cliff.delta(y ~ g_sub)
+
+    g1 <- groups[1]
+    g2 <- groups[2]
+
+    tibble(
+      variable = v,
+      group1 = g1,
+      group2 = g2,
+      n1 = sum(g_sub == g1),
+      n2 = sum(g_sub == g2),
+      median1 = median(y[g_sub == g1]),
+      median2 = median(y[g_sub == g2]),
+      IQR1 = IQR(y[g_sub == g1]),
+      IQR2 = IQR(y[g_sub == g2]),
+      p_value = wt$p.value,
+      cliffs_delta = cd$estimate
+    )
+  })
+}
+```
+
+Getting the results:
+
+```{r}
+
+results <- compare_binary_nonparam(
+  data      = OEWS_for_modelling,
+  group     = "area_type",
+  var_names = num_vars
+)
+
+print(results)
+```
+
+The data shows statistically significant differences ($p < 0.05$) between the two area types for all five variables analysed. However, the magnitude of these differences varies greatly, from large to small.
+
++----------------------+------------------+-------------------+----------------------+
+| **Variable**         | **Significance** | **Cliff's Delta** | **Interpretation**   |
++----------------------+------------------+-------------------+----------------------+
+| **employment**       | Highly Sig.      | 0.662             | **Large** difference |
++----------------------+------------------+-------------------+----------------------+
+| **mean**             | Highly Sig.      | 0.130             | Small difference     |
++----------------------+------------------+-------------------+----------------------+
+| **median**           | Highly Sig.      | 0.127             | Small difference     |
++----------------------+------------------+-------------------+----------------------+
+| **entry_wage**       | Highly Sig.      | 0.095             | Small difference     |
++----------------------+------------------+-------------------+----------------------+
+| **experienced_wage** | Highly Sig.      | 0.139             | Small difference     |
++----------------------+------------------+-------------------+----------------------+
+
+Employment (large effect):
+
+-   **Finding:** There is a large, significant difference in employment numbers between the two groups.
+
+-   **Data:** Group 2 has significantly higher employment ($Median \approx 11,880$) compared to Group 1 ($Median \approx 404$).
+
+-   **Context:** `cliffs_delta` of $0.662$ indicates a strong tendency for values in Group 2 to be higher than Group 1.
+
+Wage Metrics (small effect):
+
+While the Wilcoxon tests indicate that the differences in wages are statistically significant, the **Cliff's Delta values are small** (all roughly between $0.1$ and $0.14$).
+
+-   **Finding:** Despite large sample sizes making small differences statistically significant, the actual practical difference in wages between the two area types is small.
+
+-   **Trend:** In all wage metrics (`mean`, `median`, `entry_wage`, `experienced_wage`), Group 1 actually has slightly higher medians than Group 2, but the overlap between the distributions is substantial.
+
+Since the wage differences are statistically significant but practically small, it may be helpful to visualize the distributions to comprehend the overlap better.
+
+```{r}
+
+
+# Reshape data to long format for easier plotting of multiple wage variables
+wage_data <- OEWS_for_modelling |>
+  select(area_type, mean, median, entry_wage, experienced_wage) |>
+  pivot_longer(cols = -area_type, names_to = "wage_type", values_to = "amount")
+
+# Create the plot
+ggplot(wage_data, aes(x = wage_type, y = amount, fill = area_type)) +
+  geom_boxplot(outlier.alpha = 0.3) +
+  theme_minimal() +
+  labs(title = "Distribution of Wages by Area Type",
+       x = "Wage Metric",
+       y = "Amount ($)") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+In order to analyse if specific sub-groups show different trends, to break down the data by an additional factor, such as `major_group_code`, `occupation_title`, or `industry`.
+
+```{r}
+
+# 1. Identify a sub-group column (e.g., 'major_group' or 'occupation_code')
+# 2. Summarize the mean wage for those groups
+subgroup_analysis <- OEWS_for_modelling |>
+  # Replace 'major_group' with your actual sub-group column name
+  group_by(area_type, major_group_code) |>
+  summarise(
+    avg_mean_wage = mean(mean, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  ) |>
+  filter(count > 10) # Filter to ensure robust sample sizes
+
+# 3. View the results
+print(subgroup_analysis)
+
+# 4. Visualize sub-group trends
+ggplot(subgroup_analysis, aes(x = major_group_code,
+                              y = avg_mean_wage, fill = area_type)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Mean Wage by Area Type and Major Group",
+       x = "Major Occupation Group",
+       y = "Average Mean Wage ($)")
+```
+
+**Factor vs. Factor:**
+
+Applying the **Chi-squared test of independence** among the categorical variables (Salkind, 2007).
+
+Contingency Table (observed frequencies):
+
+-   First, to organise the data into an $r \times c$ contingency table, where $r$ is the number of categories for Variable $A$ and $c$ is the number of categories for Variable $B$.
+
+-   Let $O_{ij}$ represent the **observed frequency** (count) of observations falling into the $i$-th row and $j$-th column.
+
++---------------------------+-----------------------+-----------------------+-----------------------+
+|                           | **Variable B: Cat 1** | **Variable B: Cat 2** | **Row Totals (Ri​)**   |
++---------------------------+-----------------------+-----------------------+-----------------------+
+| **Variable A: Cat 1**     | $O_{11}$              | $O_{12}$              | $R_1$                 |
++---------------------------+-----------------------+-----------------------+-----------------------+
+| **Variable A: Cat 2**     | $O_{21}$              | $O_{22}$              | $R_2$                 |
++---------------------------+-----------------------+-----------------------+-----------------------+
+| **Column Totals (**$C_j$) | $C_1$                 | $C_2$                 | **Grand Total (**$N$) |
++---------------------------+-----------------------+-----------------------+-----------------------+
+
+Expected Frequences:
+
+Under the **Null Hypothesis (**$H_0$), to assume the variables are independent. If they are independent, the probability of falling into a specific cell should be the product of the marginal probabilities.
+
+The **Expected Frequency** ($E_{ij}$) for each cell is calculated as:
+
+$$
+E_{ij}=\frac{R_i \times C_j}{N}
+$$
+
+Where:
+
+-   $R_i$ = Total observations in row $i$
+
+-   $C_j$ = Total observations in column $j$
+
+-   $N$ = Total number of independent trips (the grand total)
+
+The Test Statistic:
+
+To quantify how much our observed data deviates from what we "expected" to see under independence, we use the $\chi^2$ statistic:
+
+$$
+\chi^2 = \sum_{i=1}^{r} \sum_{j=1}^{c} \frac{(O_{ij}-E_{ij})^2}{E_{ij}}
+$$
+
+Degrees of freedom. The shape of the $\chi^2$ distribution depends on the table's dimensions:
+
+$$
+df=(r-1)\times(c-1)
+$$
+
+Decision rule:
+
+To determine if the relationship is statistically significant, to compare our calculated $\chi^2$ value to a critical value from the $\chi^2$ distribution table at a chosen significance level (usually $\alpha = 0.05$).
+
+-   **If** $\chi^2_{calc} > \chi^2_{crit}$: We reject $H_0$. There is a significant association between the variables.
+
+-   **If** $p\text{-value} < \alpha$: We reject $H_0$.
+
+```{r}
+
+# Create a contingency table and test
+chisq_test <- chisq.test(table(OEWS_for_modelling$area_type, OEWS_for_modelling$major_group_code))
+
+# View results
+print(chisq_test)
+```
+
+Identify warning issue prior. Since the **Chi-squared test** relies on a mathematical approximation that assumes "large" expected frequencies in every cell of your table (usually at least 5). Since the data is broken down into 23 occupational groups and 2 area types, some specific combinations (like "Farming, Fishing, and Forestry" in a specific "Statewide" area type) likely have very low counts, which triggers the warning and makes the **p-value (0.7959)** less reliable.\
+Now, to run the Chi-squared test again with a **Monte Carlo simulation**, which bypasses the approximation issue by simulating the distribution.
+
+```{r}
+
+# Run Chi-squared with Monte Carlo simulation (B = number of iterations)
+chisq_fix <- chisq.test(table(OEWS_for_modelling$area_type, OEWS_for_modelling$major_group_code), 
+                        simulate.p.value = TRUE, B = 2000)
+
+print(chisq_fix)
+```
+
+There is no significant evidence of a relationship between `area_type` and `major_group_code`.
+
+To now exhibit the proportion distribution of occupations by area type.
+
+```{r}
+
+library(ggplot2)
+
+ggplot(OEWS_for_modelling, aes(x = major_group_code, fill = area_type)) +
+  geom_bar(position = "fill") + # Shows proportions (0 to 1)
+  theme_minimal() +
+  labs(
+    title = "Proportional Distribution of Occupations by Area Type",
+    subtitle = "Note how the bars are relatively level, explaining the high p-value",
+    x = "Major Group Code",
+    y = "Proportion"
+  ) +
+  coord_flip()
+```
+
+Since the proportions of **area_type 1** vs. **area_type 10** are nearly identical across almost every occupational group, there is no significant dependency.
+
+To identify which regions specialize in specific types of work, we calculate the **Location Quotient (LQ)**. This metric tells you if a region has a higher concentration of a specific occupational group compared to the average distribution across the entire dataset.
+
+An $LQ > 1.0$ indicates that the region is more specialized in that occupation than the average area.
+
+```{r}
+
+# 1. Calculate Total Employment by Group and by Region
+state_total_emp <- sum(OEWS_for_modelling$employment, na.rm = TRUE)
+
+regional_specialization <- OEWS_for_modelling |>
+  group_by(area_name, major_group_code) |>
+  summarize(group_reg_emp = sum(employment, na.rm = TRUE), .groups = "drop") %>%
+  
+  # 2. Calculate the "Share" of employment
+  group_by(area_name) |>
+  mutate(reg_total_emp = sum(group_reg_emp)) |>
+  ungroup() |>
+  
+  group_by(major_group_code) |>
+  mutate(group_total_emp = sum(group_reg_emp)) |>
+  ungroup() |>
+  
+  # 3. Calculate Location Quotient (LQ)
+  # (Local Group Share) / (Global Group Share)
+  mutate(lq = (group_reg_emp / reg_total_emp) / (group_total_emp / state_total_emp))
+
+# 4. Filter for Top 5 specialized groups per region
+top_specialties <- regional_specialization |>
+  group_by(area_name) |>
+  slice_max(order_by = lq, n = 5) |>
+  select(area_name, major_group_code, lq, group_reg_emp)
+
+print(top_specialties, n = 55)
+```
+
+Analysis of the results:
+
+-   **LQ = 1.0**: The region has the same concentration of this job as the rest of the state.
+
+-   **LQ \> 1.2**: This is a "specialized" industry for that region (e.g., Tech in NYC or Agriculture in the Finger Lakes).
+
+-   **LQ \< 1.0**: The region is "under-represented" in this field.
+
+## Unsupervised Learning
+
+Unsupervised learning or unsupervised machine learning applies machine learning (ML) algorithms to analyse and cluster unlabeled data sets (IBM, 2025). These algorithms find hidden patterns or data groupings sans the need for human intervention.\
+Unsupervised learning models are applied for three main tasks—clustering, association, and dimensionality reduction.
+
+### Clustering
+
+Clustering is a data mining technique which groups unlabeled data based on their similarities or differences. Clustering algorithms are used to process raw, unclassified data objects into groups represented by structures or patterns in the information.
+
+Will now pursue means to exhibit how regions naturally group together based on their economic profiles. One can use **K-means Clustering**. This will group regions that have similar wage structures and occupational concentrations, which is much more insightful than just looking at them geographically.
+
+**K-Means Clustering**
+
+The primary purpose of clustering is to partition unlabeled data into natural, homogeneous groups (clusters) where items in the same group are more similar to each other than to those in others. This unsupervised machine learning technique identifies hidden patterns, structures, and relationships, facilitating data segmentation, anomaly detection, and data compression
+
+K-Means clustering (Hartigan & Wong, 1979) is an unsupervised learning algorithm that partitions data into K distinct, non-overlapping subgroups (clusters) by minimising the distance between data points and their cluster centroid.
+
+To comprehend K-Means mathematically, view it as an optimisation problem where the objective is to minimise the "tightness" of each cluster.
+
+For a set of independent observations $(\mathbf{x}_1,\mathbf{x}_2,…,\mathbf{x}_n)$ where each x is a vector of your numeric features (like *lat*, *long*, *salinity*, etc.), the algorithm abides by the following steps:
+
+1.  The Objective Function:
+
+The goal is to minimize the **Within-Cluster Sum of Squares (WCSS)**, also known as Inertia:
+
+$$
+J=\sum_{i=1}^k \sum_{x \in S_i} \|\mathbf{x} - \mathbf{\mu_i}\|^2
+$$
+
+where:
+
+$k$ is the number of clusters.
+
+$S_i$ is the set of points in the $i^{th}$ cluster.
+
+$\mathbf{\mu_{i}}$ is the centroid (mean) of points in $S_i$ , defined as
+
+$$
+\mu_{\mathbf{i}}=\frac{1}{|S_i|}\sum_{x\in S_i} x
+$$
+
+$\|\mathbf{x} - \mathbf{\mu_i}\|^2$ is the squared Euclidean distance between a point and its cluster centre.
+
+2.  The Iterative Process (Lloyd’s Algorithm):
+
+The algorithm reaches the minimum through two alternating steps:
+
+Step A: Assignment (Expectation) - Assign each observation to the cluster whose mean has the least squared Euclidean distance:
+
++-------------------+-----------------------------------------+--------------------------------------------------------------------------------------------------------+
+| **Step**          | **Action**                              | **Mathematical Logic**                                                                                 |
++-------------------+-----------------------------------------+--------------------------------------------------------------------------------------------------------+
+| **1. Assignment** | Assign each $x$ to the nearest cluster. | $S_i^{(t)} = \{x_j : \|x_j - \mu_i^{(t)}\|^2 \leq \|x_j - \mu_l^{(t)}\|^2 \forall l \in \{1,...,k\}\}$ |
++-------------------+-----------------------------------------+--------------------------------------------------------------------------------------------------------+
+| **2. Update**     | Calculate the new centroids.            | $\mu_{i}^{(t+1)} = \frac{1}{|S_{i}^{(t)}|} \sum_{x_j \in S_{i}^{(t)}} x_j$                             |
++-------------------+-----------------------------------------+--------------------------------------------------------------------------------------------------------+
+
+The algorithm converges when the assignments no longer change. Because the WCSS is non-increasing at each step and there are a finite number of ways to partition the data, the algorithm is guaranteed to reach a local minimum.
+
+> **Note on Independence:** Because you treat each case as independent, the distance calculation for $x_j$ relies solely on its own features and the current centroids, without being influenced by the sequence or ordering of other cases in the dataset.
+
+Preparing the data for clustering. There's need to "shape" the data so each row is a region, and the columns are their economic features (like average entry wage, experienced wage, and total employment). Additionally, since k-means relies on Euclidean distance, features with larger scales (like trip distance in meters) will dominate features with smaller scales (like passenger count). Normalization is usually required.
+
+```{r}
+
+library(cluster)    # For clustering algorithms
+library(factoextra) # For beautiful cluster visualization
+
+# Reshape data: One row per region with averaged metrics
+cluster_data <- OEWS_for_modelling |>
+  group_by(area_name) |>
+  summarize(
+    avg_entry = mean(entry_wage, na.rm = TRUE),
+    avg_exp = mean(experienced_wage, na.rm = TRUE),
+    total_emp = sum(employment, na.rm = TRUE)
+  ) |>
+  column_to_rownames("area_name")
+
+# Scale the data (Crucial: K-means is sensitive to scale!)
+cluster_data_scaled <- scale(cluster_data)
+```
+
+Determining the optimal number of clusters. Developing a model, there's need to apply the "Elbow Method" to see how many groups (k) the data naturally forms.
+
+```{r}
+
+fviz_nbclust(cluster_data_scaled, kmeans, method = "wss") +
+  labs(subtitle = "Elbow method to determine optimal clusters")
+```
+
+Looking at the above specific graph, the sharpest bend occurs at $k = 3$.
+
+-   Moving from 1 to 2 clusters drops the value significantly.
+
+-   Moving from 2 to 3 clusters drops it significantly again.
+
+-   Moving from 3 to 4, 5, or 6 clusters yields a much smaller return on investment (smaller reduction in variance).
+
+Therefore, **3 clusters** is the most likely optimal choice based on the elbow method.
+
+Now, to develop a Silhouette Plot to confirm this finding"
+
+```{r}
+
+# --- 2. Silhouette Method ---
+fviz_nbclust(cluster_data_scaled, kmeans, method = "silhouette") +
+  labs(subtitle = "Silhouette Method Plot")
+```
+
+Analysis of the Silhouette Plot:
+
+-   **Highest Score:** The peak of the graph is at $k = 2$. This indicates that 2 clusters provide the best separation and cohesion for your data.
+
+-   **Comparison with Elbow Method:** While the Elbow Method indicated 3 clusters, the Silhouette Method is generally more precise at determining the optimal cluster structure. As well, for the Elbow method, $k=2$, it more closely resembles the "image of an elbow".
+
+Running K-Means and visual:
+
+```{r}
+
+# Load the library 
+library(ggrepel)
+
+# Run K-means with k=2
+set.seed(123)
+km_res <- kmeans(cluster_data_scaled, centers = 2, nstart = 25)
+
+# Visualize the clusters with non-overlapping labels
+fviz_cluster(km_res, data = cluster_data_scaled,
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "Regional Clusters based on Wage & Employment Profile",
+             repel = TRUE) # <--- THIS IS THE KEY ARGUMENT
+
+```
+
+Interpretation of the clusters:
+
+-   **Cluster 1 (e.g., NYC / Long Island / Hudson Valley):** High experienced wages and massive employment.
+
+-   **Cluster 2 (e.g., Capital Region / Western NY / etc.):** Moderate wages with balanced employment across groups.
+
+**Market profile of regions within the cluster:**
+
+Each centroid represents the average labour-market profile of regions within the cluster –
+
+```{r}
+
+# 1. Add cluster assignments back to the summary data
+cluster_profiles <- as.data.frame(cluster_data) |>
+  mutate(cluster = as.factor(km_res$cluster))
+
+# 2. Calculate the average profile for each cluster
+cluster_centroids <- cluster_profiles |>
+  group_by(cluster) |>
+  summarize(
+    num_regions = n(),
+    avg_entry_wage = mean(avg_entry),
+    avg_exp_wage = mean(avg_exp),
+    avg_total_emp = mean(total_emp),
+    wage_growth_potential = (avg_exp_wage - avg_entry_wage) / avg_entry_wage
+  )
+
+print(cluster_centroids)
+```
+
+Wage Profiles by Region Cluster:
+
+```{r}
+
+library(ggplot2)
+
+ggplot(cluster_profiles, aes(x = avg_entry, y = avg_exp,
+                             size = total_emp,
+                                  # the circle size is directly driven by the employment variable.
+                             color = cluster)) +
+  geom_point(alpha = 0.7) +
+  geom_text(aes(label = rownames(cluster_profiles)), 
+            vjust = -1.5, 
+            size = 3.5, 
+            check_overlap = FALSE, # Set to FALSE to ensure NYC isn't hidden
+            show.legend = FALSE) + 
+  scale_size_continuous(range = c(3, 15)) +
+  scale_x_continuous(labels = scales::dollar,
+                     expand = expansion(mult = c(0.05, 0.15))) + # Extra room on right
+  scale_y_continuous(labels = scales::dollar,
+                     expand = expansion(mult = c(0.05, 0.15))) + # Extra room on top
+  theme_minimal() +
+  labs(
+    title = "Wage Profiles by Region Cluster",
+    x = "Average Entry Wage",
+    y = "Average Experienced Wage",
+    size = "Total Employment",
+    color = "Cluster"
+  )
+```
+
+Observed from above, **New York City (NYC)** is an outlier in both wage and size. Yet, NYC is a vital economic hub. Treating such place as a purely statistical outlier isn't sensible. NYC is not just a high-wage outlier; the massive circle size shows it also carries the largest share of the state's workforce.
+
+## Random Forest
+
+### Ensemble Methods
+
+Ensemble learning methods are constituted by a set of classifiers—e.g. decision trees—and their predictions are aggregated to identify the most popular result (Kavlakoglu, 2025). The most popular ensemble methods are bagging, also known as bootstrap aggregation, and boosting. For the bagging method, a random sample of data in a training set is selected with replacement—the individual data points can be applied more than once. After multiple data samples are generated, these models are then trained independently, and depending on the type of task—i.e. regression or classification—the average or majority of those predictions yield a more accurate estimate. This approach is commonly used to reduce variance within a noisy dataset.
+
+### The Random Forest Algorithm
+
+**Bagging as the Core Mechanism**
+
+The "Random" in Random Forest comes from two levels of randomization during the training process:
+
+-   **Bootstrap Aggregating (Bagging):** The algorithm creates several subsets of the original data by sampling with replacement. Each tree is trained on a different subset.
+
+-   **Feature Randomness:** When splitting a node in a tree, the algorithm only considers a random subset of the available features (columns) rather than all of them. This ensures the trees are diverse and not all relying on the same "strongest" predictor.
+
+**The Methodology**
+
+1.  **Random Sampling:** Pick $N$ random records from the dataset (with replacement).
+
+2.  **Tree Building:** Build a Decision Tree based on these $N$ records. At each node, use only a random selection of features to find the best split.
+
+3.  **Repetition:** Repeat steps 1 and 2 many times (e.g., 100 or 500 trees).
+
+4.  **Voting/Averaging:** \* **For Classification:** Each tree "votes" for a class (e.g., "Trip Type A" vs "Trip Type B"). The class with the most votes wins.
+
+    -   **For Regression:** The algorithm takes the average of the predictions from all trees.
+
+**Why a Forest Instead of a Tree?**
+
+A single Decision Tree is prone to **overfitting**—it learns the "noise" in the training data so well that it performs poorly on new, unseen data.
+
+By aggregating many trees:
+
+-   **Variance is Reduced:** Errors from individual trees cancel each other out.
+
+-   **Robustness:** It handles missing values and "outliers" (like an unusually long or expensive trip) better than most linear models.
+
+-   **Feature Importance:** It can tell you which variables (like "Time of Day" or "Pickup Location") are the most influential in predicting the outcome.
+
+**Mathematical Perspective**
+
+If we have a collection of trees $T_1, T_2, \dots, T_B$, the final prediction $\hat{f}$ for a regression task is:
+
+$$
+\hat{f}=\frac{1}{B} \sum_{b=1}^{B} T_b(x)
+$$
+
+For classification, it is the mode of the individual tree outputs. The strength of the model is inversely proportional to the correlation between the trees; the more diverse (uncorrelated) the trees are, the better the forest performs.
+
+\
+**Predicting Median Wage with Random Forest**
+
+Will have a combination of continuous and categorical features. Hence, basic regression will not be apprropriate.
+
+**Target:** median\
+**Features:** area_type, area, occupational_title, major_group_code, employment
+
+**Summary Mapping Table for the Features:**
+
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| **Feature Name**     | **Contextual Domain** | **Description**                                                                                                   |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| `area_type`          | Socioeconomic         | Defines the geographic scale (State vs. Region), indicating urban/rural economic density.                         |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| `area`               | Socioeconomic         | Identifies specific regions, allowing for localized cost-of-living and wage comparisons.                          |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| `occupational_title` | Socioeconomic         | Defines the job role, which directly correlates to education, skill level, and earning potential.                 |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| `major_group_code`   | Socioeconomic         | The high-level industry classification, determining overall economic sector (e.g., Healthcare vs. Manufacturing). |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+| `employment`         | Demographic           | Measures the density of a specific workforce, indicating industry specialization in a region.                     |
++----------------------+-----------------------+-------------------------------------------------------------------------------------------------------------------+
+
+**Socioeconomic Spectrum:**
+
+These features define the economic standing, opportunity, and financial outcomes of individuals within a region.
+
+-   **`area` & `area_type` (Geography & Cost of Living):** These determine the economic context. For example, a `major_group_code` of **11-0000** (Management) in the New York City region (high cost of living) will have a vastly different socioeconomic implication than the same job in a rural region. These features allow you to control for regional economic disparities.
+
+-   **`occupational_title` & `major_group_code` (Education & Income):** These are the primary drivers of socioeconomic status. They act as proxies for required education level (e.g., Doctors vs. Food Service) and typically correlate strongly with earning potential.
+
+**Demography:**
+
+These features describe the composition and concentration of the workforce, acting as proxies for localized population characteristics.
+
+-   **`employment` (Workforce Concentration):** This feature maps to demography by showing where specific types of workers are concentrated. A high `employment` number for **Registered Nurses** in a specific `area` indicates a demographic concentration of skilled healthcare workers in that region.
+
+-   **`area` (Population Density):** While it is a geographic label, the `area` feature implies demographic shifts (e.g., migration from suburban to urban areas for specific jobs).
+
+Random Forest development:
+
+```{r}
+
+# Load the library
+library(ranger)
+library(dplyr)
+
+# Re-splitting data (using the same seed for consistency)
+set.seed(42)
+sample_idx <- sample(1:nrow(OEWS_for_modelling), 0.8 * nrow(OEWS_for_modelling))
+train_data <- OEWS_for_modelling[sample_idx, ]
+test_data <- OEWS_for_modelling[-sample_idx, ]
+
+# Build the Forest using ranger
+# Note: ranger formula syntax is the same as randomForest
+rf_model_ranger <- ranger(median ~ area_type + area + occupational_title + 
+                          major_group_code + employment, 
+                          data = train_data, 
+                          num.trees = 500, 
+                          importance = 'impurity') # 'impurity' is similar to Gini importance
+
+# View model summary
+print(rf_model_ranger)
+```
+
+Interpretation of Results:
+
++----------------------+----------------------+------------------------------------------------------------------------------------------------------+
+| **Metric**           | **Value**            | **Interpretation**                                                                                   |
++----------------------+----------------------+------------------------------------------------------------------------------------------------------+
+| **Type**             | Regression           | You are predicting a continuous numerical value (`median` wage).                                     |
++----------------------+----------------------+------------------------------------------------------------------------------------------------------+
+| **OOB MSE**          | 515,078,135          | Mean Squared Error. Since this is in dollars squared, it's hard to interpret directly.               |
++----------------------+----------------------+------------------------------------------------------------------------------------------------------+
+| **R squared (OOB)**  | **0.5822415**        | **Key Metric:** Your model explains roughly **58% of the variance** in median wages across New York. |
++----------------------+----------------------+------------------------------------------------------------------------------------------------------+
+
+Examining the feature importance for package 'ranger':
+
+```{r}
+
+# 1. Extract variable importance from the ranger object
+importance_scores <- importance(rf_model_ranger)
+
+# 2. Convert to a data frame for easier plotting
+importance_df <- data.frame(
+  Variable = names(importance_scores),
+  Importance = importance_scores
+)
+
+# 3. Sort and plot using ggplot2
+library(ggplot2)
+
+ggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() + # Makes labels readable
+  labs(title = "Drivers of Median Wage in NYS (Ranger)",                
+       x = "Feature", 
+       y = "Importance (Impurity)") +
+  theme_minimal()
+```
+
+Accuracy and Interpretation:
+
+To comprehend how well this model works on unseen data, to test it on the `test_data` commissioned earlier –
+
+```{r}
+
+# 1. Make predictions on the test set
+predictions <- predict(rf_model_ranger, data = test_data)
+
+# 2. Calculate Root Mean Squared Error (RMSE)
+# This gives the error in dollars ($)
+rmse <- sqrt(mean((test_data$median - predictions$predictions)^2))
+print(paste("Root Mean Squared Error:", round(rmse, 2)))
+```
+
+An RMSE of **\$21,713.16** gives us a clear benchmark. In the context of the New York labour market, this means that on average, your model's prediction of an occupation's median salary is off by about \$21.7k.
+
+Considering the massive range in your data (from entry-level service jobs to Chief Executives earning \$350k+), an $R^2$ of **0.58** and this RMSE suggest the model has captured the "middle" of the market well, but might be struggling with the extreme high-end outliers.
+
+Comprehending the error:
+
+To put that prior value in perspective, to compare it to the average median salary in the dataset:
+
+```{r}
+
+# Calculate the average median salary
+avg_median <- mean(OEWS_for_modelling$median, na.rm = TRUE)
+error_percentage <- (21713.16 / avg_median) * 100
+
+print(paste("Average Median Salary:", round(avg_median, 2)))
+print(paste("Percentage Error:", round(error_percentage, 2), "%"))
+```
+
+A **29.7% error** is a respectable starting point for a model using broad categorical labels to predict specific salaries. It confirms that while the `occupational_title` and `area` provide a strong signal, about **41.8%** of the variance ($1 - R^2$) is still "unexplained."
+
+To observe which jobs defy the model's logic, to compute the **Residuals** (the difference between Actual and Predicted). High residuals identify occupations that are either significantly "overpaid" or "underpaid" relative to the rest of the socioeconomic/demographic spectrum in the data.
+
+```{r}
+
+# 1. Add residuals to the test data
+test_results <- test_data |>
+  mutate(
+    predicted_median = predictions$predictions,
+    residual = median - predicted_median,
+    abs_error = abs(residual)
+  )
+
+# 2. Find the 10 occupations where the model was MOST wrong
+top_anomalies <- test_results |>
+  arrange(desc(abs_error)) |>
+  select(occupational_title, area_name, median, predicted_median, residual) |>
+  head(10)
+
+print(top_anomalies)
+```
+
+-   **The "Medical Ceiling" (Rows 1, 2, 4, 5, 6, 9):** Psychiatrists, Pediatricians, and Family Physicians are coming in with residuals over **\$90,000**. Most general models struggle here because these roles have a high "floor"—you can't have a "junior" Psychiatrist making \$50k. If your features don't include "Years of Education Required," the model treats them like any other office-based professional.
+
+-   **The "High-Stress Technical" Outlier (Row 3):** **Air Traffic Controllers** are a famous outlier in labor statistics. They don't usually require a Master’s or PhD, but they have extreme stress/skill requirements and high unionization, leading to a median of **\$201k** while your model expected **\$94k**.
+
+-   **The Overestimation (Row 7):** **Psychiatric Technicians** are the only ones with a massive **negative residual** (-\$92k). The model predicted they’d make \$151k, but they make \$59k. This likely happened because the model saw "Psychiatric" and grouped them with "Psychiatrists" (Row 1), failing to distinguish between the MD and the Technician role.
+
+A **Residual Plot** is the strong way to observe if the model has "Heteroscedasticity"—a fancy way of saying the model gets more "wrong" as the salaries get higher.
+
+```{r}
+
+library(ggplot2)
+
+ggplot(test_results, aes(x = predicted_median, y = residual)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residual Plot: Predicted vs. Actual Errors",
+       x = "Predicted Median Salary",
+       y = "Residual (Actual - Predicted)") +
+  theme_minimal()
+```
+
+Interpreting the above plot:
+
+-   **The "Fan" Shape:** If the points spread out like a megaphone as you move to the right, your model is struggling with high-income outliers (like the Physicians you found).
+
+-   **Random Scatter:** If the points are evenly distributed around the red line, your model's errors are truly random (which is the goal).
+
+```{r, message=FALSE, warning=FALSE}
+
+library(tidyr)
+
+library(ggplot2)
+library(scales) # Required for label_number()
+
+top_anomalies |>
+  pivot_longer(cols = c(median, predicted_median), 
+               names_to = "type", values_to = "value") |>
+  ggplot(aes(x = reorder(occupational_title, value), y = value, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  # Fix: Scale Y-axis (which is the horizontal axis due to coord_flip)
+  scale_y_continuous(labels = label_number(suffix = "k", scale = 1e-3, prefix = "$")) +
+  labs(title = "Actual vs. Predicted: Top 10 Anomalies",
+       x = "Occupation", 
+       y = "Salary (Thousands $)") +
+  theme_minimal() +
+  # Optional: Rotate if they still feel tight
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+**Psychiatric Technician** has a massive **positive** percentage error (overestimation), while the **Psychiatrist** has a massive **negative** percentage error (underestimation). This confirms that without the `soc_major` first two digits, the model is "averaging" these two very different roles.\
+Observing specifically at the contrast between **Psychiatrists** and **Psychiatric Technicians**:
+
+-   **Psychiatrists:** The actual median (red) is near the top of your scale (\~\$240k), but the prediction (teal) is dragged down significantly toward the middle.
+
+-   **Psychiatric Technicians:** The actual median (red) is quite low (\~\$60k), but the prediction (teal) is pushed way up toward that same middle ground.
+
+Without the **2-digit SOC major group** (like "29" for Practitioners vs. "31" for Support), your model is likely just seeing the word "Psychiatric" in the title or similar general features and splitting the difference. It's predicting a "generic psychiatric worker" salary of roughly **\$100k–\$150k**, which doesn't actually exist in the real world—it's too low for the MD and too high for the Tech.\
+
+#### Resolutions to Shrink the Residuals
+
+Some feature engineering ideas:
+
+-   **Credential Level:** A binary flag for "Requires MD/JD" would likely wipe out 60% of your top error.
+
+    While `entry_wage` and `experienced_wage` are great for capturing seniority, they can also serve as a proxy for the "educational floor" required for a role.
+
+    -   **The Logic:** Professions requiring an MD or JD have a high entry floor. You can create a "Credential Gap" or "Premium" feature.
+
+    -   **The Column:** Create a `wage_premium` column. If the `entry_wage` is significantly higher than the average entry wage for that area, the model learns that this is a "restricted entry" occupation (likely requiring a license or advanced degree).
+
+-   **Location Cost-of-Living Index:** Notice "New York City" and "Long Island" appear frequently; the model needs to know that \$87k in NYC is effectively a much lower wage than \$87k in the Mohawk Valley.
+
+-   **Standard Occupational Classification (SOC) Codes:** If you use the first two digits of the SOC code, the model can learn that the "29-xxxx" group (Healthcare Practitioners) has a totally different scale than "31-xxxx" (Healthcare Support).
+
+```{r}
+
+library(dplyr)
+library(stringr)
+
+# 1. Feature Engineering: SOC Major & Credential Proxy
+OEWS_fe <- OEWS_for_modelling |>
+  # Group by area to ensure regional normalization
+  group_by(area_name) |>
+  mutate(
+    # --- CREDENTIAL PROXY ---
+    # Calculates how much higher/lower the entry wage is compared to the local average
+    area_avg_entry   = mean(entry_wage, na.rm = TRUE),
+    credential_proxy = entry_wage / area_avg_entry,
+    
+    # --- COST OF LIVING (COL) INDEX ---
+    # Local economic weight based on the average median of the area
+    area_avg_median  = mean(median, na.rm = TRUE)
+  ) |>
+  ungroup() |>
+  mutate(
+    # --- STATEWIDE NORMALIZATION ---
+    state_avg_median = mean(median, na.rm = TRUE),
+    col_index        = area_avg_median / state_avg_median,
+    
+    # --- SOC MAJOR EXTRACTION ---
+    # Takes the first two digits (e.g., '29' for Healthcare Practitioners)
+    substr(major_group_code, 1, 2))
+  
+
+str(OEWS_fe)
+```
+
+Developing the new model:
+
+```{r}
+
+library(ranger)
+
+# Re-splitting data (using the same seed for consistency)
+set.seed(42)
+sample_idx <- sample(1:nrow(OEWS_fe), 0.8 * nrow(OEWS_fe))
+train_data <- OEWS_fe[sample_idx, ]
+test_data <- OEWS_fe[-sample_idx, ]
+
+
+# Define the formula
+# We include the 'Major Group' and the 'Credential Proxy' to fix the averaging issue
+rf_formula <- median ~ area_type + area + occupational_title + major_group_code + credential_proxy + col_index 
+
+# Train using ranger
+# importance = 'permutation' provides a reliable measure of feature impact
+rf_ranger_new <- ranger(
+  formula   = rf_formula, 
+  data      = train_data, 
+  num.trees = 500,
+  importance = 'permutation',
+  write.forest = TRUE
+)
+
+print(rf_ranger_new)
+
+```
+
+Generating predictions:
+
+```{r}
+
+# Generate predictions for the test set
+ranger_preds <- predict(rf_ranger_new, data = test_data)
+
+# Add them to your test_results dataframe
+test_results <- test_results |>
+  mutate(
+    predicted_median_2 = ranger_preds$predictions,
+    residual_2 = median - predicted_median_2,
+    abs_error_2 = abs(residual_2),
+    pct_error_2 = (abs_error_2 / median) * 100
+  )
+print(test_results)
+```
+
+Feature importance:
+
+```{r}
+
+# Extract and sort importance
+v_imp <- as.data.frame(importance(rf_ranger_new))
+colnames(v_imp) <- "Importance"
+v_imp <- v_imp[order(-v_imp$Importance), , drop = FALSE]
+
+print(v_imp)
+```
+
+Plotting he feature importance:
+
+```{r}
+
+# Convert row names to a column and prepare for plotting
+plot_data <- v_imp |>
+  mutate(Feature = rownames(v_imp)) |>
+  rename(Value = Importance)
+
+# Create the plot
+ggplot(plot_data, aes(x = reorder(Feature, Value), y = Value)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +  # Makes the feature names easier to read
+  labs(
+    title = "Feature Importance: What Drives the Model?",
+    subtitle = "Permutation Importance from Ranger Model",
+    x = "Feature",
+    y = "Importance (Mean Decrease in Accuracy)"
+  ) +
+  theme_minimal()
+```
+
+Evaluating the results:
+
+-   **Top Tier (High Importance):** If `major_group_code` or `credential_proxy` are at the top, the model has successfully learned the difference between an MD and a Technician. It is no longer "averaging" them based on titles alone.
+
+-   **Middle Tier:** `area_name` and `col_index` likely sit here. They provide the regional context for each independent trip/record, adjusting for the fact that a \$100k salary in NYC is different from \$100k in the Southern Tier.
+
+-   **Bottom Tier:** If a feature is very low, it means the model didn't find it helpful for reducing error. You might consider removing it in future iterations to simplify the mathematical structure.
+
+Verifying the "averaging fix":
+
+The "high" importance of `major_group_code` specifically confirms that the model is now using a "branching" logic: first identifying the occupational class (e.g., Healthcare Practitioner vs. Support) before estimating the wage
+
+Calculating the performance metrics:
+
+```{r}
+
+# Calculate R-squared and RMSE for the new model
+post_resample <- data.frame(
+  RMSE = sqrt(mean((test_results$median - test_results$predicted_median)^2)),
+  R_squared = 1 - (sum((test_results$median - test_results$predicted_median)^2) / 
+                   sum((test_results$median - mean(test_results$median))^2))
+)
+
+print(post_resample)
+```
+
+NOTE:
+
+-   Old RMSE: 21713.16
+
+-   Old R squared (OOB): 0.5822415
+
+A massive improvement! Successfully reducing the error by roughly **\$7,000** on average and boosted the model's explanatory power from **58%** to over **81%**. Hence, the applied feature engineering (the "structural" changes) captured the logic of the labour market that the raw data was missing.
+
+Logic for improvement in the metrics:
+
+-   **The RMSE Drop (**$21.7k \rightarrow 14.7k$): By adding `major_group_code` and `credential_proxy`, the model was given the "ruler" it required to measure the gap between high-barrier MDs and support staff. Instead of guessing a "middle" value for both (the "averaging" problem), the model is now hitting much closer to the true values for both categories.
+
+-   **The** $R^2$ Jump ($0.58 \rightarrow 0.81$): A jump of **0.23** indicates that theengineered features—specifically the hierarchical SOC codes and the regional cost-of-living index—successfully converted what the model previously saw as "random noise" into "predictable patterns".
+
+### Comparison Summary
+
++----------------+----------------+-----------------------------+--------------------------------+
+| **Metric**     | **Old Model**  | **New Model (Ranger + FE)** | **Improvement**                |
++----------------+----------------+-----------------------------+--------------------------------+
+| **RMSE**       | \$21,713.16    | **\$14,711.24**             | **32.2% reduction in error**   |
++----------------+----------------+-----------------------------+--------------------------------+
+| **R-squared**  | 0.5822         | **0.8119**                  | **39.4% increase in accuracy** |
++----------------+----------------+-----------------------------+--------------------------------+
+
+```{r, message=FALSE, warning=FALSE}
+
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# 1. Identify the Top 10 anomalies based on the new model's absolute error
+top_10_new <- test_results |>
+  arrange(desc(abs_error_2)) |>
+  head(10)
+
+# 2. Reshape for plotting
+plot_data_new <- top_10_new |>
+  select(occupational_title, median, predicted_median_2) |>
+  pivot_longer(cols = c(median, predicted_median_2), 
+               names_to = "type", 
+               values_to = "value") |>
+  # Improve legend labels for the plot
+  mutate(type = ifelse(type == "median", "Actual Median", "Predicted Median (New)"))
+
+# 3. Create the bar plot
+ggplot(plot_data_new, aes(x = reorder(occupational_title, value), y = value, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(suffix = "k", scale = 1e-3, prefix = "$")) +
+  labs(
+    title = "Actual vs. New Predicted: Top 10 Anomalies",
+    subtitle = "Visualizing the performance of the Ranger model (R² = 0.81)",
+    x = "Occupation", 
+    y = "Salary (Thousands $)",
+    fill = "Salary Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    legend.position = "bottom"
+  )
+```
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+# 1. Calculate APE if not already done
+test_results <- test_results |>
+  mutate(ape = abs(residual_2) / median * 100)
+
+# 2. Plotting with the fixed reorder logic
+ggplot(test_results, aes(x = fct_reorder(major_group_code, ape, .fun = stats::median), y = ape, fill = major_group_code)) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 50)) + 
+  labs(
+    title = "Prediction Accuracy by SOC Major Group",
+    subtitle = "Lower APE means higher model reliability across independent records",
+    x = "SOC Major Group (2-Digit)",
+    y = "Absolute Percentage Error (%)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Closing Remarks
+
+The findings demonstrate that combining exploratory visualization with structured feature engineering and machine learning provides a powerful framework for analysing heterogeneous labour market data. In particular, incorporating hierarchical occupational structures and contextual economic indicators substantially improves predictive stability and interpretability. By uniting descriptive and predictive techniques, this approach enables more accurate wage estimation and supports data-driven workforce planning, policy evaluation, and strategic decision-making across New York State.
+
+## References
+
+Hartigan, J. A., & Wong, M. A. (1979). Algorithm AS 136: A k-Means Clustering Algorithm. *Applied Statistics*, 28(1), 100–108.
+
+Hinton, P. (2010). Mann–Whitney U Test. In: Encyclopedia of Research Design (Vol. 0, pp. 748-750). *SAGE Publications, Inc.*, https://doi.org/10.4135/9781412961288.n228
+
+IBM. (2025, November 17). *What is Unsupervised Learning?*. IBM. https://www.ibm.com/think/topics/unsupervised-learning
+
+Kavlakoglu, E. (2025, November 20). *What is Random Forest?*. IBM. https://www.ibm.com/think/topics/random-forest
+
+New York State Department of Labor. (2025, July 2). *Occupational Employment and Wage Statistics: State of New York*. Occupational Employment and Wage Statistics \| State of New York. https://data.ny.gov/Economic-Development/Occupational-Employment-and-Wage-Statistics/gkgz-nw24/about_data
+
+Rovetta A. (2020, November 30). Raiders of the Lost Correlation: A Guide on Using Pearson and Spearman Coefficients to Detect Hidden Correlations in Medical Sciences. *Cureus*. 12(11):e11794.\
+doi: 10.7759/cureus.11794. PMID: 33409040; PMCID: PMC7779167.
+
+Salkind, N. J. (2007). Chi-Square Test for Independence. In N. J. Salkind (Ed.) Encyclopedia of Measurement and Statistics (Vol. 0, pp. 136-138). *Sage Publications*, Inc., <https://doi.org/10.4135/9781412952644.n79>
