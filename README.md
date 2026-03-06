@@ -3,6 +3,8 @@ Tobago Weather Data (HTML): https://drive.google.com/file/d/17aMF8x_WWA-w6jTtqXt
 
 Tobago Weather Data (Python): https://drive.google.com/file/d/1msDizEbuRmQmgs8dcAjzW5GDzk-hbtQC/view?usp=drive_link
 
+NYC Harbour Water Quality Analysis (HTML): https://docs.google.com/document/d/1K9HOp7DsfeKgfGq1i8CXbouI9fAyM7H0AXWpA6qPoNI/edit?usp=drive_link
+
 NYC Harbour Water Quality Analysis (Python): https://drive.google.com/file/d/1VI-hy4fveINL6o9p-xKilBmj56kPSi5p/view?usp=drive_link
 
 # Hi, I'm Le' Sean Roberts | Data Wrangling & Statistical Programming Specialist
