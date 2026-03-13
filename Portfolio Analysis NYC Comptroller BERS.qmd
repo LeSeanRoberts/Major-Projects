@@ -90,7 +90,7 @@ library(dplyr)
 #API details
 
 base_url <- "https://data.cityofnewyork.us/api/v3/views/fypi-ruxh/query.json"
-token <- "MT3MJyn9XM0eR0xq7dJj02KRQ"
+token <- "TwTP1C1bYmEFauZJmwACcREzw"
 
 target <- 100000
 batch  <- 20000   # safe upper bound
@@ -323,7 +323,7 @@ max_date
 The last function above (max_date), this finds **one single date only**:
 
 $$
-\text{max_date} = \max_{i}(\text{period_end_date}_{i})
+\text{max date} = \max_{i}(\text{period end date}_{i})
 $$
 
 So this is just the **latest reporting date** in the entire dataset.
@@ -340,7 +340,7 @@ df_latest <- df_clean |>
 Mathematically this is:
 
 $$
-df_{latest}=\{i:\,\text{period_end_date}_i=\text{max_date}\}
+df_{latest}=\{i:\,\text{period end date}_i=\text{max date}\}
 $$
 
 Of consequence, only rows from one date is kept, and discarding all others.
@@ -578,11 +578,11 @@ dim(FI)
 # Get a list of unique values for every column
 unique_cases_list_fi <- lapply(FI, unique)
 
-# To view unique cases for a specific column, e.g., 'vendorid'
-print(unique_cases_list_fi$security_description)
+# To view a 30 sample unique cases for a specific column, e.g., 'vendorid'
+head(unique_cases_list_fi$security_description, 30)
 ```
 
-The data appears to conceal "sensitive information" concerning the specifics of the fixed income instruments in portfolio. Anyways, for the case of inflation-linked or amortizing assets, original_face remains static, but **adjusted cost base** varies over time. If to use original_face, one might accidentally calculate a massive "gain" that doesn't actually exist for tax purposes, leading you to sell the wrong lots.
+The data appears to conceal "sensitive information" concerning the specifics of the fixed income instruments in portfolio. Printing all cases to view would be repulsive. Anyways, for the case of (any) inflation-linked or amortizing assets or general fixed income instruments, original_face remains static, but **adjusted cost base** varies over time. If to use original_face, one might accidentally calculate a massive "gain" that doesn't actually exist for tax purposes, leading you to sell the wrong lots.
 
 **Use of Local Total Cost Amount for Tax-Rebalancing**
 
@@ -620,8 +620,11 @@ rebalance_candidates <- portfolio_df |>
   # Sort so that the best "Sells" (the biggest losses) are at the top
   arrange(gain_pct)
 
-rebalance_candidates
+# A 30 sample 
+head(rebalance_candidates, 30)
 ```
+
+Again, if all were to be print such would be repulsive. **Furthermore**, such observed 30 sample **does not** reveal a clear picture of all the types of candidates (or asset class types).
 
 ## Industry Concentration & Herfindahl Risk
 
@@ -1190,15 +1193,15 @@ $$
 where:
 
 $$
-r_i = \frac{\text{base_unrealized_gain_loss}_i}{\text{base_market_value}_i}, \quad
+r_i = \frac{\text{base unrealized gain loss}_i}{\text{base market value}_i}, \quad
 $$
 
 $$
-w_i = \frac{\text{base_market_value}_i}{\sum_{j \in \mathcal{V}} \text{base_market_value}_j}, \quad
+w_i = \frac{\text{base market value}_i}{\sum_{j \in \mathcal{V}} \text{base market value}_j}, \quad
 $$
 
 $$
-\mathcal{V} = \{ i : \text{base_market_value}_i > 0 \}
+\mathcal{V} = \{ i : \text{base market value}_i > 0 \}
 $$
 
 $$
@@ -1251,7 +1254,7 @@ Review of dataset attributes:
 *Base Unrealized Gain/Loss*: sets forth the unrealised gain or loss in value of the investment since acquisition. With the following underlying definition:
 
 $$
-\text{Base P&L}_i=\text{Base Market Value}_i-\text{Base Total Cost}_i
+\text{Base Gain or Loss}_i = \text{Base Market Value}_i - \text{Base Total Cost}_i
 $$
 
 Measures how much money gained or lost (USD).
@@ -1259,7 +1262,7 @@ Measures how much money gained or lost (USD).
 To develop a binary loss indicator when you’re modeling portfolio loss probability using base currency:\
 
 $$
-\text{loss_flag}_i =\begin{cases}1, & \text{if } \text{Base Unrealized Gain/Loss}_i < 0, \\0, & \text{otherwise}.\end{cases}
+\text{loss flag}_i =\begin{cases}1, \text{and if Base Unrealized Gain or Loss}_i < 0, \\0, & \text{otherwise}.\end{cases}
 $$
 
 So, there's modelling for:
@@ -1491,8 +1494,13 @@ $$
 **The Explicit Logit Probability Model (scalar form)**
 
 $$
-W\,=\,\beta_0 + \beta_1 \cdot \text{interest_rate}_i+ \beta_2 \cdot \text{value}_i+ \beta_3 \cdot \text{cost}_i+ \sum_{j=1}^{J} \gamma_j \cdot \text{industry}_{ij}+ \sum_{k=1}^{K} \delta_k \cdot \text{asset_class}_{ik}
+W = \beta_0 + \beta_1 \cdot \text{interest rate}_i 
++ \beta_2 \cdot \text{value}_i
++ \beta_3 \cdot \text{cost}_i
++ \sum_{j=1}^{J} \gamma_j \cdot \text{industry}_{ij}
++ \sum_{k=1}^{K} \delta_k \cdot \text{asset\_class}_{ik}
 $$
+
 
 $$
 \Pr(\text{loss}_i = 1 \mid X_i) = \frac{1}{1 + \text{e}^{-W}}
