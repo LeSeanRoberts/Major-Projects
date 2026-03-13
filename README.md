@@ -35,5 +35,6 @@ Specifically: Concerning the attempted 'causal' scheme between vehicle collision
 
 For the files `OEWS.html` and `OEWS.qmd`, in the **General Attributes Analysis** section there **may** be a typo concerning interpretation of the following:
 results <- compare_binary_nonparam(data = OEWS_for_modelling, group = "area_type", var_names = num_vars)
+
 print(results)
 **Details:** *specifically "Group 2 has significantly higher employment (Median approximately 11,880) compared to Group 1 (Median approximately 404)*". My eyes seemingly were elsewhere while typing. Personally interpret and draw your own conclusions. 
