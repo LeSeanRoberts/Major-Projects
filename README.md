@@ -23,3 +23,9 @@ My work focuses on bridging the gap between raw system data and actionable agenc
 * **Languages:** Python and R. Subjugating SQL environments with Python or R.
 * **API/Integration:** RESTful APIs, JSON, Caching strategies
 * **DevOps/Tools:** GitHub Actions
+
+
+## ⚠️ Caveat 1
+
+For the files `Traffic Reasearch.html` and `Traffic Research.ipynb` currently contain an issue that needs to be amended.  
+Specifically: Concerning the attempted 'causal' scheme between vehicle collisions-crashed and anomalies detected from traffic data, I possibly should have further constructed/incorporated an additional condition...being, used the crashed coordinates and set condition for locations close and "infront" or "behind" facility 30. Hence, share percentage is likely lower. Also keep in mind that this type of vehicular collision (crashes) isn't encompassing of all types of crashes. As well, other possibilities for anomalies still reside.  This will be corrected in a future update (if attempted).
