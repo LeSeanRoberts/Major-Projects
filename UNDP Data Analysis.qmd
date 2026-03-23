@@ -1,0 +1,1416 @@
+---
+title: "Analysis of United Nations Development Programme (UNDP) Data "
+subtitle: |
+  [Email](lesean.roberts85@gmail.com) | 
+  [LinkedIn](https://linkedin.com/in/yourprofile) | 
+  [GitHub](https://github.com/yourusername)
+author: "Le'Sean Roberts"
+description: "CUNY New York City College of Technology Alumni (Graduate)"
+date: today
+date-format: long
+format: html
+---
+
+## Synopsis
+
+This project applies the United Nations Development Programme (UNDP) Data Futures platform (United Nations Development Programme, n.d.) to develop conventional data analysis and models. By aggregation of high-frequency indicators across human development, planetary pressure, and socioeconomic vulnerability, the platform provides a multidimensional view of global progress or retrogression. This study demonstrates how the assimilation of UNDP’s open-source data allows for the application of data modeling, predictive analytics and general machine learning techniques.
+
+## Introduction
+
+The **UNDP Data Futures Platform** is designed to translate complex global challenges into actionable insights. Its primary purpose is to provide a "single source of truth" for the **Sustainable Development Goals (SDGs)** and beyond, offering a data oriented repository for policymakers, researchers, and data scientists.
+
+Unlike conventional static databases, the platform is intended for **dynamic exploration**. It permits users to observe or develop models for the "trade-offs" between unique development perspective—for example, how economic growth might correlate with carbon emissions or how gender equality can be tied to national GDP. Its intended use is to empower stakeholders to extend beyond isolated repositories of information controlled by specific departments, teams, or systems within an organisation, inaccessible to others. Hence, the ability to observe dynamic development through an integrated, systemic lens.
+
+Such UNDP ecosystem enables **Longitudinal and Comparative Analysis**:
+
+-   **Trend Analysis:** For example, identifying the "velocity" of development—not just where a country is, but how fast it is improving or declining in specific sectors.
+
+-   **Correlation Studies:** Exploring the intersectionality of crises, such as how debt levels in developing nations influence their capacity for climate change adaptation.
+
+The UNDP's high-granularity data is particularly valuable for training advanced **Machine Learning (ML)** models:
+
+-   **Predictive Analytics:** Developing **regression models** and non-parametric models (ensemble types) or **Time-Series Forecasters** (e.g., ARIMA or LSTMs) to predict future development trajectories.
+
+-   **Clustering & Pattern Recognition:** Applying **Unsupervised Learning** (e.g., K-Means or Hierarchical Clustering) to group nations based on shared factors, vulnerabilities, dynamic, etc. rather than on geography or the tendency to pursue a geopolitical branding. This reveals "hidden" peers—countries that share similar developmental hurdles despite being on different continents. As well, can also reveal concealed uniqueness or disparities among countries that may generally not be recognised.
+
+## Data Dictionary
+
+Instead of the conventional construction of tables for the definition of attributes, to take advantage of the name of each data file acquired from the UNDP Data Futures platform. The name of each data file explicitly identifies the indicator or attribute to apply. Furthermore, there's over 20 data files considered in this project. Hence, will simply automate the process of identifying each indicator or attribute.
+
+```{r, message = FALSE, warning = FALSE}
+
+library(readr)
+library(purrr)
+
+folder_path <- "C:/Users/verlene/Downloads"
+
+# Get file info
+files_info <- list.files(
+  path = folder_path,
+  pattern = "\\.csv$",
+  full.names = TRUE
+) |> 
+  file.info()
+
+# Filter for files modified on 2026-03-22
+target_date <- as.Date("2026-03-22")
+
+filtered_files <- rownames(files_info)[
+  as.Date(files_info$mtime) == target_date
+]
+
+# Read filtered files
+data_list <- map(filtered_files, read_csv)
+
+# Name them
+names(data_list) <- basename(filtered_files)
+
+# Print with spacing
+for (i in seq_along(data_list)) {
+  cat("\n==============================\n")
+  cat("Dataset:", names(data_list)[i], "\n")
+  cat("==============================\n\n")
+  
+  print(head(data_list[[i]]))  # preview
+  
+  cat("\n\n")
+}
+```
+
+For each indicator or attribute the concept in name or title is quite direct, or easily to find on the world wide web. In addition, the units of such variables are easily interpretable; else, also easily accessible on the world wide web. All variables are continuous in nature.
+
+**NOTE:** the data stems as far back as year 1960 to currently available data (**as of date**).
+
+## Data Assimilation and Data Wrangling
+
+### Structural Wrangling
+
+The method of data assimilation applied for the primary data is pipeline based, to quickly assimilate over 20 data files into a single dataframe. Such is a consequence of the need to optimise time and to do away with the frustration of the manual assimilation of over 20 datasets that have the comma separated values (CSV) format.
+
+Reading + labelling each dataset with its indicator name:
+
+-   Read using `read_delim(";")`
+
+-   Assign column names
+
+-   Add an **indicator column based on file name**
+
+```{r, message = FALSE, warning = FALSE}
+
+
+library(readr)
+library(dplyr)
+library(purrr)
+library(tidyr)
+
+folder_path <- "C:/Users/verlene/Downloads"
+
+# Get filtered files (from your previous step)
+files_info <- list.files(
+  path = folder_path,
+  pattern = "\\.csv$",
+  full.names = TRUE
+) |> file.info()
+
+target_date <- as.Date("2026-03-22") 
+       # Concern only for .csv files downloaded on this day
+
+filtered_files <- rownames(files_info)[
+  as.Date(files_info$mtime) == target_date
+]
+
+# Function to read and tag each dataset
+read_and_tag <- function(file) {
+  read_delim(file, delim = ";", col_names = FALSE, show_col_types = FALSE) |>
+    setNames(c("country", "code", "year", "value")) |>
+    mutate(
+      indicator = tools::file_path_sans_ext(basename(file))
+    )
+}
+
+# Read all into one long dataset
+long_data <- map_dfr(filtered_files, read_and_tag)
+
+```
+
+Observation of the dataframe:
+
+```{r}
+
+str(long_data)
+```
+
+```{r}
+
+# long format observance
+
+print(long_data)
+```
+
+The consequence, a slice of the data (first 5 columns):
+
+| country | code | year | value  | indicator |
+|---------|------|------|--------|-----------|
+| Algeria | DZA  | 1986 | 6636.8 | GDP       |
+| Algeria | DZA  | 1986 | 12.5   | Inflation |
+
+However such above structure isn't practical for data modelling or analysis since indicators appear as strings in rows, while the 'value' column contains values of the indicators in a unorganised manner.
+
+There's of one column per indicator. **Wide Format** is what's required for modelling:
+
+```{r}
+
+wide_data <- long_data |>
+  pivot_wider(
+    names_from = indicator,
+    values_from = value
+  )
+
+str(wide_data)
+```
+
+New form should appear similar to:
+
+| country | code | year | GDP    | Inflation | Unemployment |
+|---------|------|------|--------|-----------|--------------|
+| Algeria | DZA  | 1986 | 6636.8 | 12.5      | NA           |
+
+```{r}
+
+print(wide_data)
+```
+
+Furthermore, observed prior, for the year and indicators columns the data types are of character form. Such isn't applicable for data modelling and analysis. To transform year into a integer type form, and making indicators numeric (continuous).
+
+```{r}
+
+countries_data <- wide_data |>
+  filter(country != "Country or Area") |>   # remove header row
+  mutate(
+    year = as.integer(year),
+    across(-c(country, code, year), as.numeric)
+  )
+
+str(countries_data)
+```
+
+To now fix any possible country name inconsistencies:
+
+```{r}
+
+library(stringr)
+
+countries_data <- countries_data |>
+  mutate(
+    country = str_squish(country),        # remove extra spaces
+    country = str_trim(country)
+  ) 
+  
+```
+
+Checking for spelling errors and duplicates:
+
+```{r}
+
+countries_data_name_check <- countries_data |>
+  distinct(country) |>
+  arrange(country)
+
+countries_data_name_check
+```
+
+```{r}
+
+# Confirmation for no duplication
+countries_data_name_check |>
+  count(country) |>
+  filter(n > 1) |>
+  arrange(desc(n))
+```
+
+### Integration of UN M49 Codes
+
+In this development standard country area codes for statistical use such as UN M49 (United Nations Statistics Division, n.d.) are useful for clustering or association applications. Hence, such will be assimilated into the data. To use `rvest` to extract the HTML table. Web scrape UN M49 numeric country codes:
+
+```{r}
+
+library(rvest)
+
+# URL
+url <- "https://unstats.un.org/unsd/methodology/m49/"
+
+# Read page
+page <- read_html(url)
+
+# Extract tables
+tables <- page |>
+  html_table(fill = TRUE)
+
+# The main country table is usually the first relevant one
+m49_raw <- tables[[1]]
+
+# Inspect column names
+colnames(m49_raw)
+```
+
+From the UN structure, to keep:
+
+-   Country or Area
+
+-   M49 Code
+
+-   ISO-alpha3 Code
+
+```{r}
+
+m49_clean <- m49_raw |> # attributes selection
+  select(
+    country = `Country or Area`,
+    m49 = `M49 code`,
+    code = `ISO-alpha3 code`
+  ) |>
+  filter(!is.na(code), code != "") |>
+  mutate( # removing unwanted characters in string
+    m49 = str_pad(as.character(m49), width = 3, pad = "0")
+  )
+
+print(m49_clean) # Observation of assimilated UN m49 attributes
+```
+
+To now join countries' data with the M49 dataframe:
+
+```{r}
+
+countries_data_code_join <- countries_data |>
+  left_join(m49_clean, by = "code")
+
+str(countries_data_code_join)
+```
+
+To now confirm whether any row has gone missing:
+
+```{r}
+
+library(dplyr)
+
+# This returns the X-1 row that was "lost"
+lost_row <- anti_join(countries_data, countries_data_code_join, by = "code")
+
+print(lost_row)
+```
+
+### Coverage-Driven Data Engineering
+
+Now, one of the most annoying aspects of panel data, is the high quantity of missing values often present. A country may be well represented throughout the years for one particular indicator, but have poor value counts for other indicators. So, for some countries, methods such as multivariate time series analysis (cointegration, VECM, etc.) or predictive analytics with covariates, or even general machine learning methods (singular or multi-country) become inoperable. For the remaining feasible indicators, models can be less powerful or informative.
+
+Instead of fighting missingness, you **formalize it** and use it to decide:
+
+-   Which countries to keep
+
+-   Which indicators to keep
+
+-   Which models are feasible
+
+#### Quantifying Indicator Coverage - Data Completeness Profile
+
+Developing a incoverage matrix to observe the fraction of missing instances per indicator:
+
+```{r}
+
+# This gives the fraction of non-missing values per indicator.
+coverage <- countries_data_code_join |>
+  summarise(
+    across(where(is.numeric), ~ mean(!is.na(.x))) 
+  ) |>
+  pivot_longer(everything(), names_to = "indicator", values_to = "coverage") |>
+  arrange(desc(coverage))
+
+coverage
+```
+
+The expression `mean(is.na(x))` calculates the **proportion of missing values (`NA` or `NaN`)** in a vector, column, or data frame.
+
+**Elaboration:**
+
+1.  **`!is.na(x)`**: Creates a logical vector of the same size as `x`, where `TRUE` (treated as 1) represents a non-missing value and `FALSE` (treated as 0) represents a valid missing value.
+
+2.  **`mean(...)`**: Calculates the average of these 1s and 0s. The resulting numeric value is the proportion of non-missing entries.
+
+**Example:**
+
+-   **Vector:** If `x <- c(1, 2, NA, 4, NA)`, then `mean(!is.na(x))` returns `0.6` (because 3 out of 5 values are not missing).
+
+#### Quantifying Country-Level Coverage
+
+```{r}
+
+country_coverage <- countries_data_code_join |>
+  group_by(country.y) |>
+  summarise(
+    across(where(is.numeric), ~ mean(!is.na(.x)))
+  ) 
+
+country_coverage
+```
+
+Initially, to observe indicators that meet the 0.6 measure of completeness:
+
+```{r}
+
+good_indicators <- coverage |>
+  filter(coverage >= 0.5) |>
+  pull(indicator)
+
+print(good_indicators)
+```
+
+From prior observation, a panel on population alone isn't just crummy—it’s **uninformative for structure, inequality, or development**. So the goal becomes pursuing a balanced, information rich cross-sectional dataset per country. Time series pursuits are no longer feasible.
+
+### Realistic High-Signal Feature Set
+
+**Demographics (as Anchors)**
+
+-   Population total
+
+-   Urban Population
+
+-   Rural population
+
+-   Population 65 + %
+
+To derive:
+
+$$
+\text{Urbanization rate} = \frac{\text{Urban}}{\text{Population}}
+$$
+
+$$
+\text{Dependency Ratio} \approx \text{Population 65+}
+$$
+
+**Macroeconomic Stability (Essential)**
+
+From the mid-coverage variables:
+
+-   GDP growth (%)
+
+-   GDP per capita growth (%)
+
+-   Inflation (%)
+
+Theses capture:
+
+-   Economic Volatility
+
+-   Growth Dynamics
+
+**Human Capital (Critical)**
+
+-   Human Capital Index (HDI)
+
+-   Mean years of schooling (total, male, female)
+
+Such above are core for clustering anf general machine learning
+
+### Constructing a Country Feature Matrix
+
+Abandoning panel—collapsing to one row per country, namely, a country-level structural dataset:
+
+```{r}
+
+# Intial Feature set with elimination of missing values
+country_features <- countries_data_code_join |>
+  group_by(country.y) |>
+  summarise(
+    population = mean(`Population total`, na.rm = TRUE),
+    urban_pop = mean(`Urban Population total`, na.rm = TRUE),
+    rural_pop = mean(`Rural Population total`, na.rm = TRUE),
+    pop_65 = mean(`Population ages 65 and above % of total population`,
+                  na.rm = TRUE),
+    
+    gdp_growth = mean(`Gross Domestic Product (GDP) percent change`,
+                      na.rm = TRUE),
+    inflation = mean(`Inflation percent change`, na.rm = TRUE),
+    
+    hdi = mean(`Human development index (HDI)`, na.rm = TRUE),
+    schooling = mean(`Mean Years of Schooling both sexes`, na.rm = TRUE),
+    
+    lfp_female = mean(`Labour Force Participation Rate female`, na.rm = TRUE),
+    lfp_male = mean(`Labour Force Participation Rate male`, na.rm = TRUE)
+  )
+```
+
+```{r}
+country_features
+```
+
+To now feature engineering the additional possible features (where power comes from):
+
+```{r}
+
+# Some feature engineering
+country_features <- country_features |>
+  mutate(
+    urbanization_rate = urban_pop / population,
+    rural_share = rural_pop / population,
+    gender_lfp_gap = lfp_male - lfp_female
+  )
+
+country_features <- country_features |>
+  na.omit()
+
+str(country_features)
+```
+
+```{r}
+
+# This gives the fraction of non-missing values per indicator for feature matrix.
+good_features_coverage <- country_features |>
+  summarise(
+    across(where(is.numeric), ~ mean(!is.na(.x))) 
+  ) |>
+  pivot_longer(everything(), names_to = "indicator", values_to = "coverage") |>
+  arrange(desc(coverage)) |>
+  print(n= Inf)
+
+good_features_coverage
+```
+
+### Light Imputation
+
+To perform imputation. Namely, filling missing values with the median. The median is the middle value in an ordered dataset, separating the higher half from the lower half.
+
+```{r}
+
+# Computing medians for columns
+medians <- country_features |>
+  summarise(
+    across(-c(country.y), ~ median(.x, na.rm = TRUE))
+  )
+
+# Applying imputation
+df_imputed <- country_features
+
+for (col in names(medians)) {
+  df_imputed[[col]][is.na(df_imputed[[col]])] <- medians[[col]]
+}
+
+# Validation after imputation
+library(dplyr)
+
+df_imputed |>
+  select(!where(is.numeric)) |>
+  summarise(across(everything(), ~ sum(is.na(.x))))
+```
+
+## Pearson Correlation for Observation of Linear
+
+One of the strong points of Pearson correlation with **continuous variables** is its ability to reveal the level of linearity among such variables.
+
+```{r}
+
+
+# Install if needed
+# install.packages("corrplot")
+
+library(corrplot)
+
+# 1. Select numeric columns and drop country.y
+df_corr <- df_imputed[, !(colnames(df_imputed) %in% "country.y")]
+
+# Keep only numeric variables
+df_corr <- df_corr[sapply(df_corr, is.numeric)]
+
+# 2. Compute correlation matrix
+cor_matrix <- cor(df_corr, use = "pairwise.complete.obs", method = "pearson")
+
+# 3. Plot heatmap (clean and readable)
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  order = "hclust",        # clusters similar variables
+  tl.col = "black",        # label color
+  tl.srt = 45,             # rotate labels for readability
+  tl.cex = 0.8,            # adjust label size
+  addCoef.col = NULL,      # removes number clutter
+  number.cex = 0.0         # ensures no numbers are printed
+)
+```
+
+From observation of the above correlation heatmap, linearity behaviour isn't dominant among the variables considered.
+
+## Feature Selection/Importance
+
+### Idea of Feature Selection and Feature Importance
+
+Due to the small size of the data, the focus now is to capture as much character as possible from the variables considered, rather than focusing on predictive models. Feature importance and selection techniques identify the most relevant input variables to improve machine learning model performance, interpretability, and training speed by reducing noise and redundancy. Feature importance ranks variables by their predictive contribution, while feature selection subsets these variables, utilizing filter, wrapper, or embedded methods to optimise the dataset.
+
+Choice of methods are **Elastic Net** and **Random Forest**:
+
+| Attribute | Elastic Net | Random Forest |
+|------------------------|------------------------|------------------------|
+| **Model Type** | Linear model (regression with regularization) | Ensemble of decision trees (nonlinear) |
+| **Core Idea** | Combines L1 (Lasso) + L2 (Ridge) penalties | Aggregates many trees using bagging + randomness |
+| **Feature Selection Mechanism** | **Built-in via L1 penalty** → shrinks some coefficients exactly to 0 | **Implicit** → features ranked by importance, but not automatically removed |
+| **Output for Importance** | Coefficients (magnitude indicates importance) | Feature importance scores (e.g., Gini importance or permutation importance) |
+| **Sparsity** | Produces **sparse models** (selects subset of features) | Typically **non-sparse** (keeps all features unless manually pruned) |
+| **Handling Multicollinearity** | Good (L2 stabilizes, L1 selects among correlated features) | Handles it well but may **spread importance across correlated features** |
+| **Interpretability** | High (direct relationship via coefficients) | Medium (importance scores but less interpretable relationships) |
+| **Nonlinearity Capture** | No (linear relationships only unless engineered features added) | Yes (captures complex nonlinear interactions automatically) |
+| **Interaction Effects** | Not captured unless explicitly included | Naturally captured via tree splits |
+| **Scaling Sensitivity** | Requires feature scaling | Not sensitive to scaling |
+| **Stability of Feature Selection** | Can be unstable with highly correlated predictors (selection may vary) | More stable rankings but can still bias toward high-cardinality features |
+| **Bias in Importance** | Coefficient magnitude reflects standardized impact | Gini importance biased toward continuous / high-cardinality variables |
+| **Permutation Importance Compatibility** | Yes (post-hoc method) | Yes (often preferred over Gini importance) |
+| **Hyperparameters Affecting Selection** | α (mix between L1/L2), λ (regularization strength) | Number of trees, max depth, min samples, feature subsampling |
+| **When to Use for Feature Selection** | When you want **explicit variable selection + interpretability** | When you want **ranking of features in nonlinear settings** |
+| **Best Use Case** | High-dimensional data, need sparsity | Complex datasets with interactions and nonlinearities |
+
+### Elastic Net
+
+The **Elastic Net** is a regularised regression method designed to overcome the specific limitations of **Lasso** and **Ridge** regression (Zou & Hastie, 2005). It is particularly powerful when dealing with datasets where predictors are highly correlated (multicollinearity) or when the number of predictors ($p$) exceeds the number of observations ($n$).
+
+To understand the purpose of Elastic Net, you have to look at the two methods it combines:
+
+1.  **The Lasso Problem (**$L_1$): Lasso is great for feature selection because it shrinks coefficients to exactly zero. However, if you have a group of highly correlated variables (e.g., "Years of Schooling" and "Literacy Rate"), Lasso will arbitrarily pick one and discard the others. This makes the model unstable.
+
+2.  **The Ridge Problem (**$L_2$): Ridge is excellent at handling correlated variables by shrinking coefficients toward each other, but it **never sets them to zero**. This leaves you with a "dense" model that is hard to interpret because every variable is still included.
+
+Elastic Net acts as a compromise, using a convex combination of both penalties to achieve a "grouping effect" where correlated predictors are retained or dropped together.
+
+The **Elastic Net** is a regularised regression method that combines the penalties of **Lasso** ($L_1$) and **Ridge** ($L_2$) regression.
+
+It minimizes the following objective function:
+
+$\min_{\beta} \left\{ \frac{1}{2n} \sum_{i=1}^{n} (y_i - x_i^T\beta)^2 + \lambda \left[ \frac{1-\alpha}{2} \sum_{j=1}^{p} \beta_j^2 + \alpha \sum_{j=1}^{p} |\beta_j| \right] \right\}$
+
+The Three Components:
+
+-   **Loss Function:** $\frac{1}{2n} \sum (y_i - x_i^T\beta)^2$ — The standard Mean Squared Error (MSE) from OLS.
+
+-   $L_2$ Penalty (Ridge): $\sum \beta_j^2$ — Shrinks coefficients toward zero, handling multicollinearity by grouping correlated variables.
+
+-   $L_1$ Penalty (Lasso): $\sum |\beta_j|$ — Forces some coefficients to exactly zero, performing automatic feature selection.
+
+The Tuning Parameters:
+
+-   $\lambda$ (Lambda): Controls the overall **strength** of the penalty. A higher $\lambda$ leads to more shrinkage.
+
+-   $\alpha$ (Alpha): Controls the **mix** between Ridge and Lasso.
+
+    -   $\alpha = 0$: Pure Ridge Regression.
+
+    -   $\alpha = 1$: Pure Lasso Regression.
+
+    -   $0 < \alpha < 1$: Elastic Net (the "compromise").
+
+Elastic Net requires the predictors to be in a **matrix** format and the target variable to be a **vector**.
+
+```{r}
+
+library(glmnet)
+
+df_imputed <- df_imputed |>
+  na.omit()
+
+# Create the matrix of predictors (X) and the response vector (y)
+X <- model.matrix(hdi ~ . - country.y, data = df_imputed)
+y <- country_features$hdi
+
+```
+
+```{r}
+
+print(length(y))
+print(nrow(X))
+```
+
+Tuning $\alpha$ and $\lambda$ . To test different values of $\alpha$ (from 0 to 1) to see which one produces the lowest Mean Squared Error (MSE).
+
+```{r}
+
+library(glmnet)
+
+
+# Define a range of alphas to test
+alphas <- seq(0, 1, by = 0.1)
+
+# A simple loop to find the best alpha
+results <- lapply(alphas, function(a) {
+  cv <- cv.glmnet(X, y, alpha = a, type.measure = "mse")
+  data.frame(alpha = a, mse = min(cv$cvm), lambda = cv$lambda.min)
+})
+
+# Combine results and find the best one
+best_params <- do.call(rbind, results) |> 
+  arrange(mse) |> 
+  slice(1)
+
+print(best_params)
+```
+
+```{r}
+# Fit the definitive model
+final_model <- glmnet(X, y, alpha = 0.9, lambda = 0.005023578)
+cv_model_optimal <- cv.glmnet(X, y, alpha = 0.9)  # Elastic Net optimse model
+```
+
+The primary strength of Elastic Net (with $\alpha = 0.9$) is that it acts almost like a Lasso, forcing many coefficients to zero. Observing which variables survived:
+
+```{r, message=FALSE}
+
+library(tidyverse)
+
+# Extract coefficients at the optimal lambda
+coefs <- coef(final_model)
+
+# Convert to a tidy dataframe for viewing
+coef_df <- as.matrix(coefs) |> 
+  as.data.frame() |> 
+  rename(Estimate = s0) |> 
+  rownames_to_column("Indicator") |> 
+  filter(Estimate != 0 & Indicator != "(Intercept)") |> 
+  arrange(desc(abs(Estimate)))
+
+print(coef_df)
+```
+
+Key Drivers:
+
+-   **Urbanization Rate (0.173):** This is your strongest positive predictor. For every unit increase in urbanization, your target variable increases by 0.173. In development terms, this suggests that infrastructure and urban density are highly correlated with your outcome.
+
+-   **Schooling (0.030):** A solid positive driver. It’s significantly smaller than urbanization but shows that human capital remains a fundamental pillar in your model.
+
+-   **Pop_65 (0.006):** A smaller but positive coefficient. This often appears in development data as a proxy for "demographic transition" or improved healthcare systems.
+
+Negative Pressures:
+
+-   **Rural Share (-0.0039):** This mirrors the urbanization finding. As the share of the population living in rural areas increases, the target variable tends to decrease.
+
+-   **Inflation (-0.000015):** While the direction is logically negative (inflation usually hurts development), the magnitude is tiny. This suggests that in the current sample, inflation isn't a primary "deal-breaker" compared to structural factors like schooling.
+
+The variables as key drivers and negative pressures are the **feature selection**.
+
+```{r}
+
+library(ggplot2)
+
+# Remove the intercept for the plot to focus on the predictors
+plot_df <- coef_df |> filter(Indicator != "(Intercept)")
+
+ggplot(plot_df, aes(x = reorder(Indicator, Estimate), y = Estimate)) +
+  geom_col(aes(fill = Estimate > 0)) +
+  coord_flip() +
+  scale_fill_manual(values = c("firebrick", "steelblue"), guide = "none") +
+  labs(
+    title = "Impact of UNDP Indicators on Target Variable",
+    subtitle = "Elastic Net Coefficients (Alpha = 0.9, Lambda = 0.005)",
+    x = NULL,
+    y = "Coefficient Estimate"
+  ) +
+  theme_minimal()
+```
+
+### Random Forest Feature Importance
+
+Random Forest measures feature importance primarily through **Mean Decrease in Impurity (Gini Importance)** or **Permutation Importance** (Breiman, 2001).
+
+Feature importance is based on how much a feature reduces impurity across all trees.
+
+In tree-based ensembles like Random Forest, feature importance is calculated by measuring how much each feature contributes to reducing the "clutter" or "error" (impurity) in the model.
+
+**\
+Total Feature Importance**
+
+The overall importance of a feature $j$ is the average of the impurity decreases it causes across all trees in the forest.
+
+$$
+FI_j = \frac{1}{T}\sum_{t=1}^{T}\sum_{n\in N_{j,t}} \Delta I(n)
+$$
+
+**Where:**
+
+-   $FI_j$: Importance of feature $j$.
+
+-   $T$: Total number of trees in the ensemble.
+
+-   $N_{j,t}$: The set of all nodes in tree $t$ where feature $j$ was used to perform a split.
+
+-   $\Delta I(n)$: The impurity decrease achieved at node $n$.
+
+**Impurity Decrease at a Specific Node**
+
+To find the decrease at a single node, we subtract the weighted impurity of the two child nodes from the impurity of the parent node.
+
+$$
+\Delta I(n) = I(n) - \left(\frac{N_L}{N} I(n_L) + \frac{N_R}{N} I(n_R) \right)
+$$
+
+**Where:**
+
+-   $I(n)$: Impurity at node $n$ (Gini Impurity for classification or MSE for regression).
+
+-   $n_L, n_R$: The left and right child nodes resulting from the split.
+
+-   $N$: Total samples at the parent node $n$.
+
+-   $N_L, N_R$: Number of samples that moved to the left and right children, respectively.
+
+A feature is considered "important" if it is frequently chosen for splits that significantly clean up the data (reducing Gini or MSE) across the entire forest.
+
+```{r}
+
+library(randomForest)
+
+# Prepare the modeling dataframe
+rf_data <- df_imputed |>
+  select(-country.y) |> # Exclude non-features
+  na.omit()                   # Ensure no NAs remain
+
+# Fit the Random Forest model
+# importance = TRUE calculates how much each variable reduces impurity
+set.seed(42) # For reproducibility
+rf_model <- randomForest(hdi ~ ., data = rf_data, importance = TRUE, ntree = 500)
+
+print(rf_model)
+
+# Extract importance into a tidy dataframe
+rf_importance <- as.data.frame(importance(rf_model))
+rf_importance$Feature <- rownames(rf_importance)
+
+# Focus on %IncMSE for the most robust ranking
+rf_importance <- rf_importance |>
+  arrange(desc(`%IncMSE`))
+
+print(rf_importance)
+
+
+ggplot(rf_importance, aes(x = reorder(Feature, `%IncMSE`), y = `%IncMSE`)) +
+  geom_point(size = 3, color = "darkgreen") +
+  geom_segment(aes(x = Feature, xend = Feature, y = 0, yend = `%IncMSE`), color = "grey") +
+  coord_flip() +
+  labs(
+    title = "Random Forest Feature Importance",
+    subtitle = "Predicting HDI using UNDP Indicators",
+    x = NULL,
+    y = "Increase in MSE if variable is removed (%)"
+  ) +
+  theme_minimal()
+```
+
+### Gradient Boosting: The Concept of "Learning from Mistakes" 
+
+**Gradient Boosting** is an ensemble machine learning technique that builds a model in a sequential manner. Instead of training many models in parallel (like Random Forest), it trains one model at a time, where each new model attempts to correct the errors made by the previous ones (Friedman, 2001).
+
+-   **The Process:** It starts with a simple "weak" model (usually a small decision tree). It calculates the **residuals** (the difference between the actual value and the prediction). The next tree is then trained specifically to predict those residuals.
+
+-   **The "Gradient" Part:** It uses a gradient descent algorithm to minimize a "Loss Function" (the measure of how wrong the predictions are) as it adds each new tree.
+
+To understand the mathematical structure of these algorithms, it helps to view them as a process of **additive functional optimisation**.
+
+**Functional Gradient Descent.** In standard Gradient Boosting, we aim to find a function $\hat{f}(x)$ that minimizes a loss function $L(y, f(x))$. Instead of updating parameters (like weights in a neural network), we add new functions (weak learners) sequentially.
+
+-   **Initial Model:** Start with a constant value, usually the mean of the target: $f_0(x) = \text{argmin}_\gamma \sum L(y_i, \gamma)$.
+
+-   **Iterative Step:** For each step $t$, we calculate the **pseudo-residuals**, which are the negative gradients of the loss function with respect to the current predictions:
+
+$$
+r_{it} = -\left[\frac{\partial L(y_i, f(x_i))}{\partial f(x_i)} \right]_{f(x)=f_{t-1}(x)}
+$$
+
+-   **Update:** We train a new weak learner $h_t(x)$ (a tree) to predict these residuals and update the model:
+
+$$
+f_t(x) = f_{t-1}(x) + \nu \cdot h_t(x)
+$$
+
+where $\nu$ is the leearning rate of "shrinkage"
+
+**XGBoost: The Taylor Expansion Approach.** XGBoost improves on this by using a **Second-Order Taylor Expansion** to approximate the loss function. This allows it to account for the curvature (Hessian) of the loss, leading to faster convergence (Friedman, 2001; Hastie, Tibshirani and Friedman, 2009; Chen and Guestrin, 2016) .
+
+The objective function at iteration $t$ is:
+
+$$
+\text{Obj}^{(t)} = \sum_{i=1}^n [L(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i)] + \Omega(f_t) 
+$$
+
+where:
+
+-   $g_i$ (Gradient): First-order derivative of the loss.
+
+-   $h_i$ (Hessian): Second-order derivative of the loss.
+
+-   $\Omega(f_t)$ (Regularization): Penalizes model complexity to prevent overfitting: $\Omega(f) = \gamma T + \frac{1}{2}\lambda \sum w_j^2$ (where $T$ is the number of leaves and $w$ are leaf weights).
+
+**XGBoost Feature Importance**. Mathematically, feature importance is derived from how much each variable contributes to reducing the objective function during the tree construction.
+
+-   **Gain:** This is the most mathematically rigorous metric. For a specific split, the "Gain" is calculated as:
+
+$$
+\text{Gain} = \frac{1}{2} \left[ \frac{G_L^2}{H_L + \lambda} + \frac{G_R^2}{H_R + \lambda} - \frac{(G_L + G_R)^2}{H_L + H_R + \lambda} \right] - \gamma
+$$
+
+where:
+
+-   $G$ and $H$ represent the sum of gradients and Hessians in the Left and Right child nodes.
+
+-   A high **Gain** means the split significantly improved the model's ability to fit the data relative to the complexity penalty ($\gamma$).
+
+```{r}
+
+library(xgboost)
+
+# 1. Prepare data (XGBoost needs a specialized 'DMatrix' object)
+# Applying the same cleaning logic as your previous models
+df_xgb <- df_imputed |> select(-country.y) |> na.omit()
+
+X <- as.matrix(df_xgb |> select(-hdi))
+y <- df_xgb$hdi
+
+dtrain <- xgb.DMatrix(data = X, label = y)
+```
+
+Unlike Random Forest, XGBoost has several "hyperparameters" to tune. For a basic implementation, we’ll use standard defaults with 100 rounds of boosting. Training the model:
+
+```{r}
+
+# Define parameters
+params <- list(
+  objective = "reg:squarederror", # For predicting a continuous number (HDI)
+  eta = 0.05,                      # Learning rate (step size)
+  max_depth = 6,                   # Complexity of the trees
+  subsample = 0.8,                 # Regularisation row sampling
+  colsample_bytree=0.8             # Regularisation feature sampling
+)
+
+# Train the model
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 500,
+  evals = list(train = dtrain),
+  print_every_n = 20,
+  verbose = 1
+)
+```
+
+Feature importance in XGBoost. XGBoost uses "Gain" as its primary importance metric. **Gain** represents the fractional contribution of each feature to the model; a higher gain means the feature was more important for improving the prediction.
+
+```{r}
+
+# Ensuring the importance matrix is accessed
+importance_matrix <- xgb.importance(feature_names = colnames(X), model = xgb_model)
+
+# Viewing the top drivers
+print(importance_matrix)
+
+# Plotting
+xgb.plot.importance(importance_matrix, 
+                    top_n = 10, 
+                    main = "XGBoost Feature Importance (Gain)")
+
+```
+
+**Comprehension of gain in XGboost**. Gain is the improvement in accuracy brought by a feature to the branches it is on. If a split on "Schooling" significantly reduces the Mean Squared Error (MSE) for a group of countries, that split gets a high Gain score.
+
+-   **Gain:** The most important for your research—it shows the relative contribution of the feature to the model's accuracy.
+
+-   **Cover:** The relative number of observations (countries) related to this feature.
+
+-   **Frequency (Weight):** The percentage of times a feature occurs in all trees of the model.
+
+GGplot version:
+
+```{r}
+
+library(ggplot2)
+
+importance_matrix |> 
+  as.data.frame() |> 
+  slice_max(Gain, n = 10) |> 
+  ggplot(aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_col(fill = "darkorange") +
+  coord_flip() +
+  labs(title = "Top 10 UNDP Drivers (XGBoost)",
+       x = "Indicator",
+       y = "Contribution to Model Accuracy (Gain)") +
+  theme_minimal()
+```
+
+### Developing Consensus for Feature Choice Among the Methods
+
+To construct a "Consensus Table," to normalise the importance scores from the **Elastic Net**, **Random Forest**, and **XGBoost** models. Since they all use different scales (Coefficients vs. %IncMSE vs. Gain), we'll convert them into a **Rank (1, 2, 3...)** to see which indicators consistently appear at the top. To now grab the top features from your previous outputs:
+
+```{r}
+
+library(dplyr)
+library(purrr)
+
+# 1. Elastic Net Rankings (Absolute Estimate)
+en_rank <- coef_df |>
+  filter(Indicator != "(Intercept)") |>
+  mutate(abs_est = abs(Estimate)) |>
+  arrange(desc(abs_est)) |>
+  mutate(Rank_EN = row_number()) |>
+  select(Indicator, Rank_EN)
+
+# 2. Random Forest Rankings (%IncMSE)
+rf_rank <- rf_importance |>
+  arrange(desc(`%IncMSE`)) |>
+  mutate(Rank_RF = row_number()) |>
+  select(Feature, Rank_RF) |>
+  rename(Indicator = Feature)
+
+# 3. XGBoost Rankings (Gain)
+xgb_rank <- importance_matrix |>
+  as.data.frame() |>
+  arrange(desc(Gain)) |>
+  mutate(Rank_XGB = row_number()) |>
+  select(Feature, Rank_XGB) |>
+  rename(Indicator = Feature)
+```
+
+By joining results from prior to now compute an **Average Rank**. The lower the average rank, the more "Unanimous" the indicator is across all three machine learning approaches.
+
+```{r}
+
+consensus_table <- en_rank |>
+  full_join(rf_rank, by = "Indicator") |>
+  full_join(xgb_rank, by = "Indicator") |>
+  # Calculate average rank, ignoring NAs if a model dropped a variable
+  rowwise() |>
+  mutate(Avg_Rank = mean(c_across(starts_with("Rank")), na.rm = TRUE)) %>%
+  arrange(Avg_Rank)
+
+print(consensus_table)
+```
+
+**Final Validation: Calculating RMSE**. To observe which model "won" in terms of raw accuracy, we calculate the **Root Mean Squared Error**.
+
+**NOTE:** will focus on on Random Forest and XGBoost because Elastic net is confined to a linear model assumption will the two ensemble models are overall non-parametric.
+
+$$
+\mathrm{RMSE} = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2}
+$$
+
+It is:
+
+-    The square root of the average squared prediction errors
+
+-    Sensitive to **large errors** (because of squaring)
+
+**Scale Matters:**
+
+RMSE is expressed in the **same units as the target variable**
+
+-    Example: if predicting house prices → RMSE is in dollars
+
+-    If predicting temperature → RMSE is in degrees
+
+This makes RMSE directly interpretable in real-world terms.
+
+**Lower is Better:**
+
+-   **RMSE = 0** → perfect predictions
+
+<!-- -->
+
+-    Smaller RMSE → better model fit
+
+<!-- -->
+
+-    Larger RMSE → larger average prediction error
+
+**Compare Relative to Data Scale:**
+
+RMSE is meaningful only in context:
+
+-    Compare RMSE to:
+
+    -    Mean of the target
+
+    -    Standard deviation of the target
+
+    -    Range of the target
+
+**Rule of thumb:**
+
+-    RMSE ≪ standard deviation → good model
+
+-    RMSE ≈ standard deviation → weak model
+
+-    RMSE \> standard deviation → poor performance
+
+```{r}
+
+# Function to calculate RMSE
+calc_rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
+
+# RF RMSE
+pred_rf <- predict(rf_model, rf_data)
+# XGB RMSE
+pred_xgb <- predict(xgb_model, dtrain)
+
+# Compare
+data.frame(
+  Model = c("Random Forest", "XGBoost"),
+  RMSE = c(calc_rmse(y, pred_rf), calc_rmse(y, pred_xgb))
+)
+```
+
+Observing summary statistics of the target for contrast with RMSE values:
+
+```{r}
+
+# Target selected
+hdi_var <- df_imputed |>
+  select(hdi)
+
+# Summary statistics for target
+summary(hdi_var)
+```
+
+```{r}
+
+sd(df_imputed$hdi)
+```
+
+Thus, we have confirmed that the ensemble models are good.
+
+**YET**, XGBoost may at times be prone to overfitting. It results in extremely high accuracy on training data but poor performance on new, unseen data, often appearing as low variance during training but high variance during testing. So the random forest model may be applied as a good baseline model.
+
+### Predicted vs. Actual" Plot for the Winning Model to See Which Countries (Outliers) It Struggles to Predict
+
+To create a **Residual Plot**, we calculate the difference between the **Actual HDI** and the **Predicted HDI** ($Residual = Actual - Predicted$).
+
+If the residuals are randomly scattered around zero, your model is performing well. However, if you see a "funnel" or "curve" shape, it tells you exactly where the model is failing—for example, it might consistently overestimate HDI for developing nations while being more accurate for developed ones.
+
+Identifying Random Forest as the victor, to extract the predictions and residuals.
+
+```{r}
+
+# Choosing the best predictions (Replace 'pred_xgb' with 'pred_rf' if RF won)
+best_preds <- as.vector(pred_rf) 
+
+# 2. Creating a diagnostic dataframe
+# Note: Ensure 'y' and 'best_preds' have the same number of rows
+residual_df <- data.frame(
+  Actual = y,
+  Predicted = best_preds,
+  Residual = y - best_preds
+)
+
+# 3. Adding a "Status" label for visualization clarity
+residual_df <- residual_df |>
+  mutate(Type = ifelse(Actual > mean(Actual), "High HDI", "Low HDI"))
+```
+
+This plot will show the **Predicted Values** on the X-axis and the **Residuals** on the Y-axis:
+
+```{r}
+
+# Add country names back to the residual dataframe
+residual_df$Country <- df_imputed$country.y 
+
+# Highlight the top 5 largest errors
+top_errors <- residual_df |> 
+  arrange(desc(abs(Residual))) |> 
+  head(5)
+
+# Add to your plot
+library(ggrepel) # for better label placement
+
+ggplot(residual_df, aes(x = Predicted, y = Residual)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", size = 1) +
+  geom_point(aes(color = Type), alpha = 0.7, size = 3) +
+  geom_smooth(method = "loess", color = "steelblue", se = FALSE) + # Trends in error
+  scale_color_manual(values = c("High HDI" = "#2c7fb8", "Low HDI" = "#f03b20")) +
+  labs(
+    title = "Residual Analysis: Model Error vs. HDI Level",
+    subtitle = "Are errors consistent across different development stages?",
+    x = "Predicted HDI",
+    y = "Residual (Actual - Predicted)"
+  ) +
+  theme_minimal() + 
+  geom_text_repel(data = top_errors, aes(label = Country))
+```
+
+| Pattern | Meaning | Interpretation for Your UNDP Project |
+|-------------------|------------------|-----------------------------------|
+| Random Scatter | Ideal | Your model is equally "fair" to both high and low-HDI countries. |
+| U or S Shape | Non-Linearity | Your model is missing a squared or interaction term (e.g., the effect of schooling accelerates as HDI rises). |
+| Funnel Shape | Heteroscedasticity | Your model is much more accurate for one group (likely High HDI) and struggles with the volatility of the other (Low HDI). |
+| Specific Outliers | Exceptional Cases | These are countries that "defy the trend"—for example, a country with high urbanization but unexpectedly low HDI. |
+
+Observe the **blue LOESS line**. It starts below zero for Low HDI countries and finishes above zero for High HDI countries.
+
+-   **For Low HDI (Red):** The model consistently **over-predicts** (Actual is lower than Predicted). It's a bit too "optimistic" about these countries based on their urbanization or schooling rates.
+
+-   **For High HDI (Blue):** The model consistently **under-predicts** (Actual is higher than Predicted). These countries are achieving a higher HDI than their indicators would suggest.
+
+-   **The Interpretation:** There is likely a **non-linear interaction** or a missing variable (like "Governance Quality" or "Historical Wealth") that helps wealthy nations maximize their indicators better than poorer ones.
+
+The "Low HDI" (red) cluster is much more scattered than the "High HDI" (blue) cluster.
+
+-   **Low HDI Variability:** Notice the red dots dipping down to **-0.08**. This indicates that the relationship between indicators (like schooling) and HDI is much more "volatile" in developing nations.
+
+-   **High HDI Consistency:** The blue dots are more tightly packed around the zero line. This suggests that once a country reaches a certain development threshold, the relationship between your predictors and HDI becomes more stable and predictable.
+
+There is one red dot near **Predicted 0.5** that is nearly **-0.10** below the line.
+
+-   **Action:** You should identify this country. If its actual HDI is significantly lower than its urbanization/schooling suggests, it might be a country experiencing conflict, extreme inequality, or a specific economic crisis that the general model doesn't "know" about.
+
+For **Djibouti**, **Sierra Leone**, **Niger**, and **Nauru**, the model predicted a higher HDI than what they actually achieved.
+
+-   **Djibouti & Nauru:** These are classic examples of the "Small Island/State" paradox. They may have high urbanization or specific economic indicators that suggest a higher development level, but their actual HDI is dragged down by specific local constraints (like resource dependency or health infrastructure) that a global model misses.
+
+-   **Sierra Leone & Niger:** The model is being too optimistic here. This suggests that the "returns" on things like schooling or urbanization are lower in these countries, likely due to structural issues, past conflict, or extreme poverty traps.
+
+**Bhutan** is your most interesting data point. The model predicted a lower HDI, but the country actually achieved a significantly higher one.
+
+-   **The "Gross National Happiness" Effect:** Bhutan is famous for prioritizing holistic development over pure economic growth. This positive residual is quantitative proof that Bhutan is "punching above its weight"—it is turning its available resources into human development more efficiently than almost any other country in the "Low HDI" group.
+
+**Diagnostic:**
+
+1.  **Model Accuracy:** While the RMSE is low, the model is **heteroscedastic**—it is much more reliable for high-income nations than for developing ones.
+
+2.  **Structural Bias:** The LOESS curve shows a "developmental lag." Lower-HDI countries face friction that prevents them from converting indicators (like schooling) into HDI as effectively as the "Blue" (High HDI) group.
+
+3.  **Policy Recommendation:** For countries like **Djibouti**, policy shouldn't just focus on the indicators the model likes (like urbanization); it needs to address the "hidden" factors causing that **-0.08** residual gap.
+
+## Structural Discovery or Segmentation with Clustering 
+
+Clustering is a solid next step for **structural discovery / segmentation** in the UNDP-style dataset. The goal is to uncover *natural groupings of countries* based on socio-economic indicators, without using HDI solely for interpretation.
+
+### K-Means Clustering
+
+K-means clustering is an unsupervised machine learning algorithm that partitions unlabeled datasets into distinct, non-overlapping clusters based on feature similarity. It iteratively minimizes the sum of squared distances between data points and their cluster centroid, assigning points to the nearest center and updating centroids until convergence (MacQueen, 1967; Hartigan and Wong, 1979).
+
+The mathematical goal of **K-means clustering** is to partition $n$ observations into $K$ clusters by minimizing the **Within-Cluster Sum of Squares (WCSS)**.
+
+**The Objective Function:**
+
+The algorithm seeks to find $K$ clusters ($S = \{S_1, S_2, \dots, S_K\}$) that minimize the squared Euclidean distances between points and their assigned cluster centers (centroids $\mu_i$):
+
+$$
+J = \sum_{i=1}^{K} \sum_{x \in S_i}|x-\mu_i \|^2
+$$
+
+**The iterative Process:**
+
+K-means reaches this minimum through two alternating steps:
+
+1.  Assignment Expectation –
+
+Each observation $x_j$ is assigned to the cluster with the nearest centroid.
+
+$$
+S_i^{(t)} = \{x_j: \|x_j - \mu_i^{(t)} \|^2 \le \|x_j -\mu_{i^*}^{(t)} \|^2, \forall i^* \}
+$$
+
+2.  Update (Maximisation) –
+
+The centroids are recalculated by taking the mean of all points assigned to that cluster.
+
+$$\mu_i^{(t+1)} = \frac{1}{|S_i^{(t)}|} \sum_{x_j \in S_i^{(t)}} x_j$$
+
+**Key Concepts for the UNDP Data:**
+
+-   **Centroid (**$\mu$): The "average" country profile for that cluster (e.g., a "Mid-HDI" cluster centroid).
+
+-   **Euclidean Distance:** The straight-line distance in multi-dimensional space (e.g., distance between a country's schooling/urbanization and the cluster average).
+
+-   **Convergence:** The process stops when assignments no longer change, meaning the WCSS has reached a local minimum.
+
+### What Clustering is Doing In This Data Context
+
+To try identifying groups like:
+
+-   High development / high income / high education
+
+-    Emerging economies
+
+-    Low development / high volatility
+
+-    Mixed structural profiles
+
+These clusters can reveal:
+
+-    hidden regimes in development
+
+-    non-linear structure missed by regression models
+
+-    segmentation for policy analysis
+
+Data Preparation:
+
+```{r}
+
+# Remove non-numeric / identifiers
+df_cluster <- df_imputed[, !(colnames(df_imputed) %in% c("country.y"))]
+
+# Keep only numeric variables
+df_cluster <- df_cluster[sapply(df_cluster, is.numeric)]
+
+# Scale variables (VERY important for clustering)
+df_scaled <- scale(df_cluster)
+```
+
+In the above scaling ensures variables with large ranges don’t dominate distance calculations.
+
+K-Means Clustering (Baseline Segmentation):
+
+```{r}
+
+set.seed(123)
+
+# Choose number of clusters (example: 3)
+k <- 3
+km <- kmeans(df_scaled, centers = k, nstart = 25)
+
+# Assign cluster labels
+df_imputed$cluster_kmeans <- km$cluster
+```
+
+Choosing optimal number of clusters (Elbow Method):
+
+```{r}
+
+wss <- sapply(1:10, function(k){
+  kmeans(df_scaled, centers = k, nstart = 25)$tot.withinss
+})
+
+plot(1:10, wss, type = "b", pch = 19,
+     xlab = "Number of Clusters",
+     ylab = "Within-cluster Sum of Squares")
+```
+
+For the above, the "Elbow" is the point where the rate of decrease shifts from **sharp** to **gradual**.
+
+-   Looking at the plot, the most distinct "bend" occurs at $K = 3$.
+
+-   After $K = 3$, the curve flattens significantly. Adding a 4th or 5th cluster doesn't provide nearly as much "information gain" (variance explanation) as the jump from 2 to 3 did.
+
+```{r}
+
+aggregate(df_cluster, by = list(cluster = km$cluster), mean)
+```
+
+For the above, such conveys:
+
+-    what defines each cluster
+
+-    how clusters differ structurally
+
+Visualizing clusters (PCA projection):
+
+```{r}
+
+# pca_df to ensure it exists in memory
+pca_res <- prcomp(df_scaled)
+pca_df <- data.frame(
+  PC1 = pca_res$x[, 1],
+  PC2 = pca_res$x[, 2],
+  Cluster = as.factor(km$cluster),
+  Country = df_imputed$country.y
+)
+
+# Re-run the base plot
+plot(pca_df$PC1, pca_df$PC2,
+     col = pca_df$Cluster,
+     pch = 19,
+     xlab = "PC1 (Development Level)",
+     ylab = "PC2 (Structural Uniqueness)",
+     main = "UNDP Clusters: Key Representative Countries",
+     xlim = c(min(pca_df$PC1), max(pca_df$PC1) + 1)) # Add space for labels
+
+# Define who gets a label (The "Outliers")
+# We calculate the distance from the center (0,0)
+dist <- sqrt(pca_df$PC1^2 + pca_df$PC2^2)
+
+# Logic: Label if they are in the top 15% of distance OR have extreme PC2
+to_label <- dist > quantile(dist, 0.85) | abs(pca_df$PC2) > 2
+
+# Add only the filtered labels vertically
+text(pca_df$PC1[to_label], pca_df$PC2[to_label], 
+     labels = pca_df$Country[to_label], 
+     pos = 4, 
+     srt = 90, 
+     cex = 0.6, 
+     col = "grey20",
+     offset = 0.5)
+
+# Add the legend back
+legend("topright", legend = levels(pca_df$Cluster), col = 1:3, pch = 19, title = "Clusters")
+```
+
+Apparently observed above is the possible overrated "Global North versus Global South" for **"development"**.
+
+```{r}
+
+# 1. Separate the coordinates by cluster
+# (Assuming Cluster 1 is Black and Cluster 3 is Green based on your plot)
+black_pts <- pca_df[pca_df$Cluster == 1, c("PC1", "PC2")]
+green_pts <- pca_df[pca_df$Cluster == 3, c("PC1", "PC2")]
+
+# 2. Calculate distances from every Green point to every Black point
+# We use a distance matrix
+dist_matrix <- as.matrix(dist(rbind(green_pts, black_pts)))
+
+# 3. Subset the matrix to only compare Green (rows) to Black (cols)
+# Green is rows 1:nrow(green_pts), Black is the rest
+gb_dist <- dist_matrix[1:nrow(green_pts), (nrow(green_pts) + 1):ncol(dist_matrix)]
+
+# 4. Find the minimum distance
+min_dist_idx <- which(gb_dist == min(gb_dist), arr.ind = TRUE)
+
+# 5. Extract the "Bridge Country" name
+bridge_country_name <- rownames(green_pts)[min_dist_idx[1, 1]]
+target_black_name <- rownames(black_pts)[min_dist_idx[1, 2]]
+
+print(paste("The Green country closest to the Black cluster is:", bridge_country_name))
+print(paste("It is closest to:", target_black_name))
+
+# Get the actual names using the indices found
+bridge_name <- df_imputed$country.y[21]
+target_name <- df_imputed$country.y[5]
+
+print(paste("The 'Bridge' Country (Green) is:", bridge_name))
+print(paste("The 'Target' Country (Black) is:", target_name))
+```
+
+Comparing clusters against HDI:
+
+```{r}
+
+aggregate(df_imputed$hdi, by = list(cluster = km$cluster), mean)
+```
+
+## Closing Remarks
+
+In conclusion, this study demonstrates the value of leveraging the United Nations Development Programme Data Futures Platform as an integrated data ecosystem for modern analytics. By consolidating multidimensional indicators across human development, environmental pressure, and socioeconomic vulnerability, the platform enables more holistic and dynamic analysis than traditional siloed datasets. Its structure supports both longitudinal and comparative perspectives, allowing for meaningful exploration of trends, correlations, and trade-offs inherent in global development.
+
+Furthermore, the application of machine learning techniques—ranging from regression, feature importance (selection) to clustering—highlights the platform’s utility beyond descriptive analysis. Through tools such as the UNDP Data Futures Platform, researchers and policymakers can uncover hidden relationships, identify peer groups of countries with similar developmental challenges, and better anticipate future trajectories. Overall, this approach reinforces the importance of integrated, data-driven frameworks for informing evidence-based decision-making and advancing progress toward the Sustainable Development Goals.
+
+## References
+
+Breiman, L. (2001). Random Forests. *Machine Learning*, *45*(1), 5–32. doi.org
+
+Chen, T., & Guestrin, C. (2016). XGBoost: A Scalable Tree Boosting System. In *Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining* (pp. 785–794). <https://doi.org/10.1145/2939672.2939785>
+
+Friedman, J. H. (2001). Greedy Function Approximation: A Gradient Boosting Machine. *Annals of Statistics, 29*(5), 1189–1232. <https://doi.org/10.1214/aos/1013203451>
+
+Hartigan, J. A., & Wong, M. A. (1979). Algorithm AS 136: A K-Means Clustering Algorithm. *Applied Statistics, 28*(1), 100–108.
+
+Hastie, T., Tibshirani, R., & Friedman, J. (2009). *The Elements of Statistical Learning: Data Mining, Inference, and Prediction* (2nd ed.). Springer.
+
+MacQueen, J. (1967). Some Methods for Classification and Analysis of Multivariate Observations. In *Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability* (Vol. 1, pp. 281–297). University of California Press.
+
+United Nations Development Programme. (n.d.). *Access All Data*. <https://data.undp.org/access-all-data>
+
+United Nations Statistics Division. (n.d.). *Standard Country or Area Codes for Statistical Use (M49)*. <https://unstats.un.org/unsd/methodology/m49/>
+
+Zou, H., & Hastie, T. (2005). Regularization and Variable Selection via the Elastic Net. *Journal of the Royal Statistical Society: Series B (Statistical Methodology)*, *67*(2), 301–320. doi.org
