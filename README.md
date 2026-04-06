@@ -50,4 +50,4 @@ Zero-Inflated Data: For variables like rain_sum or snowfall_sum, the 95th percen
 
 Inclusive Boundaries: Using >= and <= is standard, but in very small datasets, high quantiles might flag a large number of ties.
 
-AS WELL, for places with temperature climate, choose those places that are consistent with snowfall to avoid sustainability issues with HMM type models. 
+AS WELL, for places with temperature climate, choose those places that are consistent with snowfall to avoid sustainability issues with HMMs. 
