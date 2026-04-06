@@ -49,3 +49,5 @@ For the TREK WITH METEOROLOGICAL AND CLIMATE DATA Projects....
 Zero-Inflated Data: For variables like rain_sum or snowfall_sum, the 95th percentile can sometimes be $0$ if the region is very arid or in a non-snowy month. This would result in every day being flagged as "extreme." You may want to filter for days where value > 0 before calculating the quantile.
 
 Inclusive Boundaries: Using >= and <= is standard, but in very small datasets, high quantiles might flag a large number of ties.
+
+AS WELL, for places with temperature climate, choose those places that are consistent with snowfall to avoid sustainability issues with HMM type models. 
